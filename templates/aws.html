@@ -1,213 +1,87 @@
 {% extends "layout.html" %}
 
-{% block title %}AWS Instance Web{% endblock %}
+{% block title %}AWS 实例管理器 (Web版){% endblock %}
 
 {% block head_extra %}
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
 <style>
-    .aws-shell {
-        display: flex;
-        flex-direction: column;
-        gap: 1.5rem;
-    }
+    .aws-shell { display: flex; flex-direction: column; gap: 1.5rem; }
     .aws-hero {
-        position: relative;
-        overflow: hidden;
-        padding: 2rem;
-        border-radius: 24px;
+        position: relative; overflow: hidden; padding: 2rem; border-radius: 24px;
         border: 1px solid rgba(99, 102, 241, 0.22);
-        background:
-            radial-gradient(circle at top right, rgba(56, 189, 248, 0.16), transparent 22%),
-            radial-gradient(circle at left center, rgba(99, 102, 241, 0.22), transparent 26%),
-            linear-gradient(135deg, rgba(15, 23, 42, 0.96), rgba(30, 41, 59, 0.9));
+        background: radial-gradient(circle at top right, rgba(56, 189, 248, 0.16), transparent 22%),
+                    radial-gradient(circle at left center, rgba(99, 102, 241, 0.22), transparent 26%),
+                    linear-gradient(135deg, rgba(15, 23, 42, 0.96), rgba(30, 41, 59, 0.9));
         box-shadow: 0 20px 60px rgba(2, 6, 23, 0.34);
     }
     .aws-hero::after {
-        content: '';
-        position: absolute;
-        inset: auto -50px -50px auto;
-        width: 180px;
-        height: 180px;
-        border-radius: 50%;
-        background: radial-gradient(circle, rgba(99, 102, 241, 0.18), transparent 68%);
-        pointer-events: none;
+        content: ''; position: absolute; inset: auto -40px -40px auto; width: 180px; height: 180px;
+        border-radius: 50%; background: radial-gradient(circle, rgba(99, 102, 241, 0.16), transparent 68%); pointer-events: none;
     }
-    .aws-badge {
-        display: inline-flex;
-        align-items: center;
-        gap: 0.45rem;
-        padding: 0.45rem 0.85rem;
-        border-radius: 999px;
-        border: 1px solid rgba(99, 102, 241, 0.3);
-        background: rgba(99, 102, 241, 0.1);
-        color: #c7d2fe;
-        font-size: 0.76rem;
-        font-weight: 800;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
+    .oci-badge {
+        display: inline-flex; align-items: center; gap: 0.45rem; padding: 0.45rem 0.85rem; border-radius: 999px;
+        border: 1px solid rgba(99, 102, 241, 0.28); background: rgba(99, 102, 241, 0.1); color: #818cf8;
+        font-size: 0.76rem; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase;
     }
-    .aws-hero-title {
-        font-size: clamp(2rem, 3vw, 3rem);
-        font-weight: 800;
-        color: #f8fafc;
-        margin: 0.9rem 0 0.55rem;
+    .oci-hero-title { font-size: clamp(2rem, 3vw, 3rem); font-weight: 800; color: #f8fafc; margin: 0.9rem 0 0.55rem; }
+    .oci-hero-desc { color: #94a3b8; max-width: 62rem; line-height: 1.8; margin-bottom: 0; }
+
+    .oci-stat-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; }
+    .oci-stat-card {
+        min-height: 130px; padding: 1.1rem 1.25rem; border-radius: 20px; border: 1px solid rgba(148, 163, 184, 0.12);
+        background: linear-gradient(180deg, rgba(15, 23, 42, 0.92), rgba(30, 41, 59, 0.84)); box-shadow: 0 14px 36px rgba(2, 6, 23, 0.26);
+        cursor: pointer; transition: outline 0.2s ease;
     }
-    .aws-hero-desc {
-        color: #94a3b8;
-        max-width: 58rem;
-        line-height: 1.8;
-        margin-bottom: 0;
+    .oci-stat-card.primary { border-color: rgba(99, 102, 241, 0.24); }
+    .oci-stat-card.info { border-color: rgba(56, 189, 248, 0.22); }
+    .oci-stat-card.success { border-color: rgba(16, 185, 129, 0.22); }
+
+    .oci-stat-icon {
+        width: 42px; height: 42px; border-radius: 14px; display: inline-flex; align-items: center; justify-content: center;
+        margin-bottom: 0.9rem; color: #fff; font-size: 1.05rem;
+        background: linear-gradient(135deg, rgba(99, 102, 241, 0.92), rgba(79, 70, 229, 0.82));
+        box-shadow: 0 12px 24px rgba(99, 102, 241, 0.2);
     }
-    .aws-stat-grid {
-        display: grid;
-        grid-template-columns: repeat(4, minmax(0, 1fr));
-        gap: 1rem;
-    }
-    .aws-stat-card {
-        min-height: 130px;
-        padding: 1.1rem 1.25rem;
-        border-radius: 20px;
-        border: 1px solid rgba(148, 163, 184, 0.12);
-        background: linear-gradient(180deg, rgba(15, 23, 42, 0.92), rgba(30, 41, 59, 0.84));
-        box-shadow: 0 14px 36px rgba(2, 6, 23, 0.26);
-    }
-    .aws-stat-card.primary { border-color: rgba(249, 115, 22, 0.24); }
-    .aws-stat-card.info { border-color: rgba(56, 189, 248, 0.22); }
-    .aws-stat-card.success { border-color: rgba(16, 185, 129, 0.22); }
-    .aws-stat-card.warning { border-color: rgba(245, 158, 11, 0.24); }
-    .aws-stat-icon {
-        width: 42px;
-        height: 42px;
-        border-radius: 14px;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        margin-bottom: 0.9rem;
-        color: #fff;
-        font-size: 1.05rem;
-        background: linear-gradient(135deg, rgba(234, 88, 12, 0.92), rgba(249, 115, 22, 0.82));
-        box-shadow: 0 12px 24px rgba(249, 115, 22, 0.2);
-    }
-    .aws-stat-card.info .aws-stat-icon { background: linear-gradient(135deg, rgba(2, 132, 199, 0.92), rgba(56, 189, 248, 0.82)); }
-    .aws-stat-card.success .aws-stat-icon { background: linear-gradient(135deg, rgba(5, 150, 105, 0.92), rgba(16, 185, 129, 0.82)); }
-    .aws-stat-card.warning .aws-stat-icon { background: linear-gradient(135deg, rgba(217, 119, 6, 0.92), rgba(245, 158, 11, 0.82)); }
-    .aws-stat-label {
-        color: #94a3b8;
-        font-size: 0.78rem;
-        font-weight: 700;
-        text-transform: uppercase;
-        letter-spacing: 0.08em;
-        margin-bottom: 0.35rem;
-    }
-    .aws-stat-value {
-        color: #f8fafc;
-        font-size: 1.15rem;
-        font-weight: 800;
-    }
-    .aws-stat-sub {
-        color: #64748b;
-        font-size: 0.8rem;
-        margin-top: 0.2rem;
-    }
-    .aws-section-card {
-        border-radius: 22px;
-        overflow: hidden;
-    }
-    .aws-section-card .card-header {
-        padding: 1rem 1.25rem;
-    }
-    .aws-card-title {
-        display: flex;
-        align-items: center;
-        gap: 0.75rem;
-        font-weight: 800;
-        color: #f8fafc;
-    }
-    .aws-card-title i {
-        width: 34px;
-        height: 34px;
-        border-radius: 12px;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        background: rgba(99, 102, 241, 0.16);
-        color: #a5b4fc;
-    }
-    .aws-panel-note {
-        color: #64748b;
-        font-size: 0.82rem;
-    }
-    .aws-grid-2 {
-        display: grid;
-        grid-template-columns: 1.05fr 1.35fr;
-        gap: 1.5rem;
-    }
-    .aws-operation-grid {
-        display: grid;
-        grid-template-columns: 1.15fr 1fr;
-        gap: 1.5rem;
-    }
-    .aws-action-stack {
-        display: flex;
-        flex-direction: column;
-        gap: 1rem;
-    }
-    .aws-sub-card {
-        padding: 1rem;
-        border-radius: 18px;
-        border: 1px solid rgba(148, 163, 184, 0.12);
-        background: rgba(15, 23, 42, 0.55);
-    }
-    .aws-sub-card-title {
-        font-size: 0.86rem;
-        color: #cbd5e1;
-        font-weight: 700;
-        margin-bottom: 0.75rem;
-        display: flex;
-        align-items: center;
-        gap: 0.55rem;
-    }
-    .aws-sub-card-title i {
-        color: #60a5fa;
-    }
-    .aws-userdata {
-        min-height: 360px;
-        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-        font-size: 0.84rem;
-        line-height: 1.65;
-    }
-    .action-group {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 0.75rem;
-    }
-    .action-group .btn {
-        flex-grow: 1;
-        min-width: 130px;
-    }
-    .aws-log {
-        background: linear-gradient(180deg, rgba(2, 6, 23, 0.98), rgba(15, 23, 42, 0.96)) !important;
-        color: #86efac !important;
-        border-color: rgba(16, 185, 129, 0.16) !important;
-        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-        font-size: 0.82rem;
-        line-height: 1.6;
-    }
-    .table-hover tbody tr {
-        cursor: pointer;
-    }
-    #createLsBtn:disabled,
-    #createEc2Btn:disabled {
-        background: rgba(51, 65, 85, 0.45) !important;
-        border-color: rgba(148, 163, 184, 0.1) !important;
-        color: #64748b !important;
-        opacity: 1;
-    }
+    .oci-stat-card.info .oci-stat-icon { background: linear-gradient(135deg, rgba(2, 132, 199, 0.92), rgba(56, 189, 248, 0.82)); box-shadow: 0 12px 24px rgba(56, 189, 248, 0.2); }
+    .oci-stat-card.success .oci-stat-icon { background: linear-gradient(135deg, rgba(5, 150, 105, 0.92), rgba(16, 185, 129, 0.82)); box-shadow: 0 12px 24px rgba(16, 185, 129, 0.2); }
+
+    .oci-stat-label { color: #94a3b8; font-size: 0.78rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 0.35rem; }
+    .oci-stat-value { color: #f8fafc; font-size: 1.15rem; font-weight: 800; }
+    .oci-stat-sub { color: #64748b; font-size: 0.8rem; margin-top: 0.2rem; }
+
+    .oci-section-card { border-radius: 22px; overflow: hidden; }
+    .oci-section-card .card-header { padding: 1rem 1.25rem; }
+    .oci-card-title { display: flex; align-items: center; gap: 0.75rem; font-weight: 800; color: #f8fafc; }
+    .oci-card-title i { width: 34px; height: 34px; border-radius: 12px; display: inline-flex; align-items: center; justify-content: center; background: rgba(99, 102, 241, 0.14); color: #818cf8; }
+    .oci-panel-note { color: #64748b; font-size: 0.82rem; }
+
+    .connected-profile-card .card { background: rgba(15, 23, 42, 0.58); border: 1px solid rgba(148, 163, 184, 0.12); box-shadow: none; }
+    .connected-profile-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.9rem; }
+    .connected-profile-summary-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.9rem; }
+    .connected-profile-item { min-height: 78px; padding: 0.75rem 0.9rem; border-radius: 16px; border: 1px solid rgba(148, 163, 184, 0.12); background: rgba(15, 23, 42, 0.52); }
+    .connected-profile-item-label { font-size: 0.76rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 0.45rem; }
+    .connected-profile-item-value { color: #e2e8f0; font-weight: 600; line-height: 1.35; word-break: break-word; font-size: 0.92rem; }
+    .connected-profile-item-value.compact { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+    .oci-empty-state { border: 1px dashed rgba(148, 163, 184, 0.2); border-radius: 18px; background: rgba(15, 23, 42, 0.42); color: #94a3b8; }
+    .oci-empty-state strong { color: #e2e8f0; }
+
+    .action-group { display: flex; flex-wrap: wrap; gap: 0.75rem; }
+    .action-group .btn { flex: 1 1 0; min-width: 0; }
+    .oci-log { background: linear-gradient(180deg, rgba(2, 6, 23, 0.98), rgba(15, 23, 42, 0.96)) !important; color: #86efac !important; border-color: rgba(16, 185, 129, 0.16) !important; font-family: ui-monospace, SFMono-Regular, monospace; }
+
+    .modal-content { background: linear-gradient(180deg, rgba(15, 23, 42, 0.98), rgba(15, 23, 42, 0.94)); border: 1px solid rgba(148, 163, 184, 0.16); box-shadow: 0 28px 80px rgba(2, 6, 23, 0.5); }
+    .modal-header { border-bottom: 1px solid rgba(148, 163, 184, 0.12); background: rgba(2, 6, 23, 0.24); }
+    .modal-footer { border-top: 1px solid rgba(148, 163, 184, 0.12); background: rgba(2, 6, 23, 0.16); }
+    .oci-modal-lead { color: #94a3b8; font-size: 0.84rem; margin-top: 0.35rem; }
+
     @media (max-width: 1199.98px) {
-        .aws-stat-grid,
-        .aws-grid-2,
-        .aws-operation-grid {
-            grid-template-columns: 1fr;
-        }
+        .oci-stat-grid { grid-template-columns: 1fr 1fr; }
+        .connected-profile-summary, .connected-profile-summary-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @media (max-width: 767.98px) {
+        .oci-stat-grid { grid-template-columns: 1fr; }
+        .connected-profile-summary, .connected-profile-summary-3 { grid-template-columns: 1fr; }
     }
 </style>
 {% endblock %}
@@ -216,158 +90,72 @@
 <div class="container py-2 py-lg-3">
     <div class="aws-shell">
         <section class="aws-hero">
-            <div class="aws-badge">
-                <i class="bi bi-amazon"></i>
-                AWS Compute Control Plane
-            </div>
-            <h1 class="aws-hero-title">AWS Instance Web</h1>
-            <p class="aws-hero-desc">将 AWS 账户接入、区域启用、实例创建、实例运维和日志输出整合到统一的深色控制台视图中。在不改变任何功能与交互逻辑的前提下，升级为更具科技感和控制中心气质的管理界面。</p>
+            <div class="oci-badge"><i class="bi bi-cloud-aws"></i>AWS Control Plane</div>
+            <h1 class="oci-hero-title">AWS 实例管理器</h1>
+            <p class="oci-hero-desc">在此处管理您的 AWS 凭证、查询区域配额、激活所需区域，并一键创建 EC2 或 Lightsail 实例。</p>
         </section>
 
-        <section class="aws-stat-grid">
-            <div class="aws-stat-card primary">
-                <div class="aws-stat-icon"><i class="bi bi-person-vcard"></i></div>
-                <div class="aws-stat-label">账户接入</div>
-                <div class="aws-stat-value">AWS Profiles</div>
-                <div class="aws-stat-sub">保存并切换云账号凭证</div>
-            </div>
-            <div class="aws-stat-card info">
-                <div class="aws-stat-icon"><i class="bi bi-globe2"></i></div>
-                <div class="aws-stat-label">区域控制</div>
-                <div class="aws-stat-value">Region Activation</div>
-                <div class="aws-stat-sub">按区域启用并查询资源状态</div>
-            </div>
-            <div class="aws-stat-card success">
-                <div class="aws-stat-icon"><i class="bi bi-cpu"></i></div>
-                <div class="aws-stat-label">实例创建</div>
-                <div class="aws-stat-value">EC2 / Lightsail</div>
-                <div class="aws-stat-sub">保留原创建流程与弹窗能力</div>
-            </div>
-            <div class="aws-stat-card warning">
-                <div class="aws-stat-icon"><i class="bi bi-terminal"></i></div>
-                <div class="aws-stat-label">日志追踪</div>
-                <div class="aws-stat-value">Operation Output</div>
-                <div class="aws-stat-sub">统一展示任务执行与状态反馈</div>
-            </div>
+        <section class="oci-stat-grid">
+            <button type="button" class="oci-stat-card primary text-start border-0 w-100" data-bs-toggle="modal" data-bs-target="#accountsModal">
+                <div class="oci-stat-icon"><i class="bi bi-person-workspace"></i></div>
+                <div class="oci-stat-label">账户管理</div>
+                <div class="oci-stat-value" id="profilesStatValue">AWS Profiles</div>
+                <div class="oci-stat-sub" id="profilesStatSub">添加凭证、连接、切换管理账户</div>
+            </button>
+            <button type="button" class="oci-stat-card info text-start border-0 w-100" data-bs-toggle="modal" data-bs-target="#regionQuotaModal">
+                <div class="oci-stat-icon"><i class="bi bi-globe"></i></div>
+                <div class="oci-stat-label">区域与配额</div>
+                <div class="oci-stat-value">Regions & Quotas</div>
+                <div class="oci-stat-sub">选择默认区域及查询 vCPU 配额</div>
+            </button>
+            <button type="button" class="oci-stat-card success text-start border-0 w-100" id="createInstanceHeroBtn" disabled>
+                <div class="oci-stat-icon"><i class="bi bi-plus-circle"></i></div>
+                <div class="oci-stat-label">实例创建</div>
+                <div class="oci-stat-value">Launch Instances</div>
+                <div class="oci-stat-sub">在当前连接账户中快速部署</div>
+            </button>
         </section>
 
-        <section class="aws-grid-2">
-            <div class="card aws-section-card h-100">
-                <div class="card-header">
-                    <div class="d-flex justify-content-between align-items-start gap-3">
-                        <div>
-                            <div class="aws-card-title"><i class="bi bi-plus-circle"></i><span>添加新账户</span></div>
-                            <div class="aws-panel-note mt-2">录入 AWS Access Key 与 Secret，用于后续账户连接与实例管理。</div>
-                        </div>
-                    </div>
-                </div>
-                <div class="card-body">
-                    <form id="addAccountForm">
-                        <div class="mb-3"><label for="accountName" class="form-label">账户名称</label><input type="text" class="form-control" id="accountName" required></div>
-                        <div class="mb-3"><label for="accessKey" class="form-label">Access Key ID</label><input type="text" class="form-control" id="accessKey" required></div>
-                        <div class="mb-3"><label for="secretKey" class="form-label">Secret Access Key</label><input type="password" class="form-control" id="secretKey" required></div>
-                        <div class="d-grid mt-4"><button type="button" id="saveAccountBtn" class="btn btn-primary">保存账户</button></div>
-                    </form>
-                </div>
-            </div>
-
-            <div class="card aws-section-card d-flex flex-column h-100">
-                <div class="card-header d-flex justify-content-between align-items-center gap-3 flex-wrap">
-                    <div>
-                        <div class="aws-card-title"><i class="bi bi-collection"></i><span>账户列表</span></div>
-                        <div class="aws-panel-note mt-2">选择账户后可加载区域、查询配额与管理实例。<small id="currentAccountStatus" class="ms-2 text-muted"></small></div>
-                    </div>
-                    <button id="queryAllQuotasBtn" class="btn btn-sm btn-primary">一键查询所有配额</button>
-                </div>
-                <div class="card-body p-0 flex-grow-1" style="overflow-y: auto; min-height: 320px;">
-                    <div class="table-responsive">
-                        <table class="table table-striped table-hover mb-0">
-                            <thead>
-                                <tr>
-                                    <th>账户名称</th>
-                                    <th class="text-center">vCPU配额</th>
-                                    <th class="text-center">操作</th>
-                                </tr>
-                            </thead>
-                            <tbody id="accountList">
-                                <tr><td colspan="3" class="text-center text-muted">正在加载...</td></tr>
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-                <div class="card-footer d-flex justify-content-center pt-3 pb-3">
-                    <nav id="pagination-nav"></nav>
-                </div>
-            </div>
-        </section>
-
-        <section class="card aws-section-card">
-            <div class="card-header">
-                <div class="aws-card-title"><i class="bi bi-sliders"></i><span>操作区域</span></div>
-                <div class="aws-panel-note mt-2">保留原区域激活、实例创建与 User Data 逻辑，仅重构可视化布局。</div>
-            </div>
-            <div class="card-body">
-                <div class="aws-operation-grid">
-                    <div class="aws-action-stack">
-                        <div class="aws-sub-card">
-                            <div class="aws-sub-card-title"><i class="bi bi-geo-alt"></i>区域控制</div>
-                            <div class="row g-3 align-items-center">
-                                <div class="col-12 col-xl-auto"><label for="regionSelector" class="col-form-label mb-0">选择区域</label></div>
-                                <div class="col"><select class="form-select" id="regionSelector" disabled><option>请先选择AWS账户</option></select></div>
-                                <div class="col-12 col-xl-auto"><button id="activateRegionBtn" class="btn btn-outline-secondary w-100" disabled>激活此区域</button></div>
-                            </div>
-                        </div>
-
-                        <div class="aws-sub-card">
-                            <div class="aws-sub-card-title"><i class="bi bi-cloud-plus"></i>创建实例</div>
-                            <div class="action-group">
-                                <button id="createEc2Btn" class="btn btn-success" disabled>创建 EC2 实例</button>
-                                <button id="createLsBtn" class="btn btn-info" disabled>创建 Lightsail 实例</button>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="aws-sub-card h-100">
-                        <div class="aws-sub-card-title"><i class="bi bi-code-slash"></i>开机脚本 (User Data)</div>
-                        <textarea id="userData" class="form-control aws-userdata" rows="15">#!/bin/bash
-# 标记文件路径，确保脚本只运行一次
-FLAG_FILE="/etc/.user-data-executed"
-
-# 仅在实例首次启动时运行初始化操作
-if [ ! -f "$FLAG_FILE" ]; then
-    echo "--- Running First-Time Initialization ---"
-
-    # --- 步骤 1: 设置密码并配置 SSH ---
-    echo "root:You22kme#12345" | sudo chpasswd
-    sudo sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin yes/g' /etc/ssh/sshd_config
-    sudo sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/g' /etc/ssh/sshd_config
-    sudo systemctl restart sshd || sudo service ssh restart
-
-    # --- 步骤 2: 安装节点脚本 (Xray & gost) ---
-    (wget -qO- https://raw.githubusercontent.com/SIJULY/xray/main/vless.sh | sed 's/\r//' | bash && \
-    wget -qO- https://raw.githubusercontent.com/SIJULY/xray/main/vmess.sh | sed 's/\r//' | bash && \
-    wget -qO- https://raw.githubusercontent.com/SIJULY/xray/main/Shadowsocks.sh | bash && \
-    wget -qO- https://raw.githubusercontent.com/SIJULY/xray/main/ss5.sh | bash) > /root/xray_install.log 2>&1
-
-    # --- 步骤 3: 创建标记文件，防止下次重启时再次执行 ---
-    sudo touch "$FLAG_FILE"
-    echo "--- First-Time Initialization Complete ---"
-fi
-                        </textarea>
-                    </div>
-                </div>
-            </div>
-        </section>
-
-        <section class="card aws-section-card">
+        <section class="card oci-section-card connected-profile-card">
             <div class="card-header d-flex justify-content-between align-items-center gap-3 flex-wrap">
                 <div>
-                    <div class="aws-card-title"><i class="bi bi-hdd-stack"></i><span>实例信息</span></div>
-                    <div class="aws-panel-note mt-2">支持查询选中区域或所有区域，并对实例执行启动、停止、重启、更换 IP、删除等操作。</div>
+                    <div class="oci-card-title"><i class="bi bi-person-badge"></i><span>当前连接账户</span></div>
+                    <div class="oci-panel-note mt-2">此处仅展示当前已连接 AWS 账户的概览信息。<span id="currentAccountStatus" class="ms-2 text-muted">未连接</span></div>
                 </div>
-                <div class="action-group" style="max-width: 420px; width: 100%;">
-                    <button id="querySelectedRegionBtn" class="btn btn-sm btn-outline-primary" disabled>查询选中区域</button>
-                    <button id="queryAllRegionsBtn" class="btn btn-sm btn-outline-secondary" disabled>查询所有区域</button>
+                <div class="d-flex gap-2 flex-wrap align-items-center">
+                    <button id="createEc2Btn" class="btn btn-success btn-sm profile-action-btn" disabled data-bs-toggle="modal" data-bs-target="#ec2TypeModal"><i class="bi bi-cpu"></i> 创建 EC2</button>
+                    <button id="createLsBtn" class="btn btn-info btn-sm profile-action-btn text-white" disabled data-bs-toggle="modal" data-bs-target="#lightsailTypeModal"><i class="bi bi-box"></i> 创建 Lightsail</button>
+                    <button id="disconnectAccountBtn" class="btn btn-danger btn-sm profile-action-btn" disabled><i class="bi bi-power"></i> 断开连接</button>
+                </div>
+            </div>
+
+            <div class="card-body">
+                <div id="connectedProfileEmptyState" class="oci-empty-state text-center py-5"><div class="mb-2"><i class="bi bi-person-bounding-box fs-2"></i></div><strong>尚未连接 AWS 账号</strong><div class="small mt-2">请先在“账户管理”弹出窗口中选择并连接一个账号。</div></div>
+                <div id="connectedProfileDetails" class="d-none">
+                    <div class="connected-profile-summary mb-3">
+                        <div class="connected-profile-item"><div class="connected-profile-item-label">账户名称</div><div id="connectedProfileAlias" class="connected-profile-item-value compact">-</div></div>
+                        <div class="connected-profile-item"><div class="connected-profile-item-label">Access Key</div><div id="connectedProfileKey" class="connected-profile-item-value compact">-</div></div>
+                        <div class="connected-profile-item"><div class="connected-profile-item-label">默认区域</div><div id="connectedProfileRegion" class="connected-profile-item-value compact text-info">-</div></div>
+                        <div class="connected-profile-item"><div class="connected-profile-item-label">IAM 身份</div><div class="connected-profile-item-value compact">Root / IAM User</div></div>
+                    </div>
+                    <div class="connected-profile-summary-3">
+                        <div class="connected-profile-item"><div class="connected-profile-item-label">连接状态</div><div id="connectedProfileStatusBadge" class="connected-profile-item-value compact"><span class="badge bg-success-subtle text-success border border-success-subtle">已连接</span></div></div>
+                        <div class="connected-profile-item"><div class="connected-profile-item-label">CloudWatch 监控</div><div class="connected-profile-item-value text-success">已启用</div></div>
+                        <div class="connected-profile-item"><div class="connected-profile-item-label">备注</div><div class="connected-profile-item-value text-muted small">AWS Boto3 API Client</div></div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="card oci-section-card">
+            <div class="card-header d-flex justify-content-between align-items-center gap-3 flex-wrap">
+                <div>
+                    <div class="oci-card-title"><i class="bi bi-server"></i><span>实例列表 (当前区域)</span></div>
+                    <div class="oci-panel-note mt-2">管理当前区域内的 EC2 与 Lightsail 实例。</div>
+                </div>
+                <div class="d-flex gap-2 flex-wrap">
+                    <button id="querySelectedRegionBtn" class="btn btn-sm btn-primary" disabled><i class="bi bi-arrow-clockwise"></i> 刷新当前区域</button>
+                    <button id="queryAllRegionsBtn" class="btn btn-sm btn-outline-info" disabled><i class="bi bi-search"></i> 查询所有区域</button>
                 </div>
             </div>
             <div class="card-body p-0">
@@ -375,51 +163,138 @@ fi
                     <table class="table table-hover mb-0">
                         <thead>
                             <tr>
-                                <th>类型</th>
-                                <th class="text-center">区域</th>
-                                <th class="text-center">名称/ID</th>
-                                <th class="text-center">状态</th>
-                                <th class="text-center">公网IP</th>
-                                <th class="text-center">运行时间</th>
+                                <th style="width: 25%; padding-left: 1rem;">实例名称</th>
+                                <th class="text-center" style="width: 15%;">状态</th>
+                                <th class="text-center" style="width: 20%;">公网 IP</th>
+                                <th class="text-center" style="width: 10%;">类型</th>
+                                <th class="text-center" style="width: 15%;">所在区域</th>
+                                <th class="text-center" style="width: 15%;">运行时间</th>
                             </tr>
                         </thead>
-                        <tbody id="instanceList">
-                            <tr><td colspan="6" class="text-center text-muted">请先查询实例</td></tr>
-                        </tbody>
+                        <tbody id="instanceList"><tr><td colspan="6" class="text-center text-muted py-5">请先连接账户并点击刷新</td></tr></tbody>
                     </table>
                 </div>
             </div>
             <div class="card-footer text-center py-3">
-                <div id="instanceActionGroup" class="action-group" role="group">
-                    <button type="button" id="startBtn" class="btn btn-success" disabled>启动实例</button>
-                    <button type="button" id="stopBtn" class="btn btn-warning" disabled>停止实例</button>
-                    <button type="button" id="restartBtn" class="btn btn-info" disabled>重启实例</button>
-                    <button type="button" id="changeIpBtn" class="btn btn-secondary" disabled>更换IP</button>
-                    <button type="button" id="deleteBtn" class="btn btn-danger" disabled>删除实例</button>
+                <div id="instanceActionGroup" class="action-group">
+                    <button type="button" id="startBtn" class="btn btn-success" disabled>启动</button>
+                    <button type="button" id="stopBtn" class="btn btn-danger" disabled>关机</button>
+                    <button type="button" id="restartBtn" class="btn btn-warning" disabled>重启</button>
+                    <button type="button" id="changeIpBtn" class="btn btn-info" disabled>更换IP</button>
+                    <button type="button" id="deleteBtn" class="btn btn-danger" disabled>删除/终止</button>
                 </div>
             </div>
         </section>
 
-        <section class="card aws-section-card">
+        <section class="card oci-section-card">
             <div class="card-header d-flex justify-content-between align-items-center gap-3 flex-wrap">
-                <div class="aws-card-title"><i class="bi bi-terminal-split"></i><span>日志输出</span></div>
-                <button id="clearLogBtn" class="btn btn-sm btn-outline-danger">清除日志</button>
+                <div class="oci-card-title"><i class="bi bi-terminal-split"></i><span>任务与日志输出</span></div>
+                <button id="clearLogBtn" class="btn btn-sm btn-outline-secondary">清除日志</button>
             </div>
             <div class="card-body p-2">
-                <pre id="logOutput" class="form-control mb-0 aws-log" style="height: 220px;"></pre>
+                <div id="logOutput" class="form-control oci-log" style="height: 250px; overflow-y: auto;"></div>
             </div>
         </section>
     </div>
 </div>
 
-<div class="modal fade" id="ec2TypeModal" tabindex="-1">
-    <div class="modal-dialog"><div class="modal-content"><div class="modal-header"><h5 class="modal-title">选择 EC2 实例类型</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><div id="ec2Spinner" class="text-center" style="display: none;"><div class="spinner-border" role="status"><span class="visually-hidden">Loading...</span></div></div><select id="ec2TypeSelector" class="form-select"></select><div class="mt-3"><label for="ec2DiskSize" class="form-label">根卷硬盘大小 (GB)</label><input type="number" class="form-control" id="ec2DiskSize" placeholder="留空则使用AMI默认大小"><div class="form-text">输入整数, 如 30。留空则使用官方默认大小。</div></div></div><div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button><button type="button" id="confirmEc2CreationBtn" class="btn btn-primary">确认开启</button></div></div></div>
+<div class="modal fade" id="accountsModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-xl">
+        <div class="modal-content">
+            <div class="modal-header align-items-center">
+                <div class="flex-grow-1">
+                    <h5 class="modal-title">AWS 账户管理</h5>
+                    <div class="oci-modal-lead">在此连接、切换和删除您的 AWS 账户凭证。</div>
+                </div>
+                <div class="d-flex align-items-center gap-3 pe-3">
+                    <button class="btn btn-sm rounded-pill text-white px-3 py-2 fw-bold" style="background: linear-gradient(135deg, #0ea5e9, #3b82f6); border: none; box-shadow: 0 4px 12px rgba(59, 130, 246, 0.25);" data-bs-toggle="modal" data-bs-target="#addAccountModal">
+                        <i class="bi bi-person-plus-fill me-1"></i> 添加新账户
+                    </button>
+                </div>
+                <button type="button" class="btn-close m-0 ms-2" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead><tr><th>账户名称</th><th>Access Key</th><th>默认区域</th><th class="text-end">操作</th></tr></thead>
+                        <tbody id="accountList"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
 </div>
+
+<div class="modal fade" id="addAccountModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">添加 AWS 账户</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="addAccountForm">
+                    <div class="mb-3">
+                        <label class="form-label">账户名称 (自定义)</label>
+                        <input type="text" class="form-control" name="name" placeholder="例如: aws-sg-1" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Access Key ID</label>
+                        <input type="text" class="form-control" name="access_key" placeholder="AKIA..." required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Secret Access Key</label>
+                        <input type="password" class="form-control" name="secret_key" placeholder="在此输入您的密钥" required>
+                    </div>
+                    <div class="text-end mt-4">
+                        <button type="button" class="btn btn-secondary me-2" data-bs-dismiss="modal">取消</button>
+                        <button type="submit" class="btn btn-primary" id="saveAccountBtn">保存账户</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="regionQuotaModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div><h5 class="modal-title">全局区域与配额管理</h5><div class="oci-modal-lead">选择区域及查询全局 vCPU 配额，并一键激活未开通的区域。</div></div>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <h6 class="mb-0 fw-bold text-white">当前选中操作区域：</h6>
+                    <div class="d-flex gap-2">
+                        <select id="regionSelector" class="form-select form-select-sm" style="width: auto; min-width: 250px;">
+                            <option value="us-east-1" selected>us-east-1 (美国东部)</option>
+                            <option value="ap-northeast-1">ap-northeast-1 (东京)</option>
+                            <option value="ap-southeast-1">ap-southeast-1 (新加坡)</option>
+                        </select>
+                        <button id="setDefaultRegionBtn" class="btn btn-sm btn-primary" disabled>确定</button>
+                        <button id="activateRegionBtn" class="btn btn-sm btn-outline-warning" disabled>激活此区域</button>
+                    </div>
+                </div>
+                <hr>
+                <div class="text-center py-4">
+                    <button id="queryAllQuotasBtn" class="btn btn-info px-4 py-2" disabled><i class="bi bi-cpu"></i> 一键查询当前区域 vCPU 配额</button>
+                    <div class="form-text mt-2">查询结果将直接输出到主面板的“任务与日志输出”窗口中。</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="ec2TypeModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered"><div class="modal-content"><div class="modal-header"><h5 class="modal-title">创建 EC2 实例</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><div class="mb-3"><label class="form-label">自定义开机脚本 (User Data)</label><textarea class="form-control" id="userData" rows="3" placeholder="#!/bin/bash&#10;echo 'Hello World' > /tmp/hello.txt"></textarea></div><div id="ec2Spinner" class="text-center mb-3" style="display: none;"><div class="spinner-border text-primary" role="status"></div></div><select id="ec2TypeSelector" class="form-select mb-3"></select><div><label for="ec2DiskSize" class="form-label">根卷大小 (GB)</label><input type="number" class="form-control" id="ec2DiskSize" placeholder="留空则使用默认"><div class="form-text">输入整数。</div></div></div><div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button><button type="button" id="confirmEc2CreationBtn" class="btn btn-primary">确认创建</button></div></div></div>
+</div>
+
 <div class="modal fade" id="lightsailTypeModal" tabindex="-1">
-    <div class="modal-dialog"><div class="modal-content"><div class="modal-header"><h5 class="modal-title">选择 Lightsail 实例类型</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><div id="lightsailSpinner" class="text-center" style="display: none;"><div class="spinner-border" role="status"><span class="visually-hidden">Loading...</span></div></div><select id="lightsailTypeSelector" class="form-select"></select></div><div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button><button type="button" id="confirmLightsailCreationBtn" class="btn btn-primary">确认开启</button></div></div></div>
+    <div class="modal-dialog modal-dialog-centered"><div class="modal-content"><div class="modal-header"><h5 class="modal-title">创建 Lightsail 实例</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><div id="lightsailSpinner" class="text-center mb-3" style="display: none;"><div class="spinner-border text-primary" role="status"></div></div><select id="lightsailTypeSelector" class="form-select"></select></div><div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button><button type="button" id="confirmLightsailCreationBtn" class="btn btn-primary">确认创建</button></div></div></div>
 </div>
 {% endblock %}
 
 {% block scripts %}
-<script src="{{ url_for('static', filename='js/aws_script.js') }}"></script>
+<script src="{{ url_for('static', filename='js/aws_script.js', v='2026040505') }}"></script>
 {% endblock %}
