@@ -9,7 +9,7 @@
 
 # --- 配置 ---
 INSTALL_DIR="/opt/cloud_manager"
-REPO_URL="https://github.com/SIJULY/cloud_manager.git"
+REPO_URL="https://github.com/SIJULY/cloud_manager_pro.git"
 SERVICE_NAME="cloud_manager"
 CELERY_SERVICE_NAME="cloud_manager_celery"
 CADDY_CONFIG_START="# Cloud Manager Panel Configuration Start"
