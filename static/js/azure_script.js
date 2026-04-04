@@ -1,95 +1,110 @@
 document.addEventListener('DOMContentLoaded', function() {
-    const VM_SIZE_MAP = {
-        "Standard_B1s": "B1s (1 vCPU, 1 GB RAM)", "Standard_B1ms": "B1ms (1 vCPU, 2 GB RAM)",
-        "Standard_B2s": "B2s (2 vCPU, 4 GB RAM)", "Standard_D2s_v3": "D2s v3 (2 vCPU, 8 GB RAM)",
-        "Standard_F2s_v2": "F2s v2 (2 vCPU, 4 GB RAM)"
-    };
-
     const UI = {
-        vmList: document.getElementById('vmList'), accountList: document.getElementById('accountList'),
-        addAccountForm: document.getElementById('addAccountForm'), currentAccountStatus: document.getElementById('currentAccountStatus'),
-        refreshBtn: document.getElementById('refreshVms'), logOutput: document.getElementById('logOutput'),
-        clearLogBtn: document.getElementById('clearLogBtn'), queryAllStatusBtn: document.getElementById('queryAllStatusBtn'),
-        startBtn: document.getElementById('startBtn'), stopBtn: document.getElementById('stopBtn'),
-        restartBtn: document.getElementById('restartBtn'), changeIpBtn: document.getElementById('changeIpBtn'),
-        deleteBtn: document.getElementById('deleteBtn'), regionSelector: document.getElementById('regionSelector'),
-        createVmBtn: document.getElementById('createVmBtn'), userData: document.getElementById('userData'),
-        createVmModal: document.getElementById('createVmModal'), confirmCreateVmBtn: document.getElementById('confirmCreateVmBtn'),
-        vmRegionDisplay: document.getElementById('vmRegionDisplay'),
-        editAccountModal: document.getElementById('editAccountModal'),
-        confirmEditAccountBtn: document.getElementById('confirmEditAccountBtn'),
-        editOriginalAccountName: document.getElementById('editOriginalAccountName'),
-        editAccountName: document.getElementById('editAccountName'),
-        editExpirationDate: document.getElementById('editExpirationDate'),
-    };
-    
-    let selectedInstance = null;
-    let createVmModalInstance;
-    let editAccountModalInstance;
-    let cachedAccounts = [];
+        vmList: document.getElementById('vmList'),
+        accountList: document.getElementById('accountList'),
+        addAccountForm: document.getElementById('addAccountForm'),
+        currentAccountStatus: document.getElementById('currentAccountStatus'),
+        refreshBtn: document.getElementById('refreshVms'),
+        logOutput: document.getElementById('logOutput'),
+        clearLogBtn: document.getElementById('clearLogBtn'),
 
-    const log = (message, type = 'info') => {
-        const now = new Date().toLocaleTimeString();
-        const colorClass = type === 'error' ? 'text-danger' : (type === 'success' ? 'text-success' : '');
-        UI.logOutput.innerHTML += `<div>[${now}] ${message.replace(/\n/g, '<br>')}</div>`;
+        queryAllStatusBtn: document.getElementById('queryAllStatusBtn'),
+        createVmModalBtn: document.getElementById('createVmModalBtn'),
+
+        startBtn: document.getElementById('startBtn'),
+        stopBtn: document.getElementById('stopBtn'),
+        restartBtn: document.getElementById('restartBtn'),
+        changeIpBtn: document.getElementById('changeIpBtn'),
+        deleteBtn: document.getElementById('deleteBtn'),
+        regionSelector: document.getElementById('regionSelector'),
+
+        createVmCardBtn: document.getElementById('createVmCardBtn'),
+        disconnectAccountBtn: document.getElementById('disconnectAccountBtn'),
+
+        createVmBtn: document.getElementById('confirmCreateVmBtn'),
+        userData: document.getElementById('userData'),
+
+        createVmModal: document.getElementById('createVmModal') ? new bootstrap.Modal(document.getElementById('createVmModal')) : null,
+        addAccountModal: document.getElementById('addAccountModal') ? new bootstrap.Modal(document.getElementById('addAccountModal')) : null,
+        accountsModal: document.getElementById('accountsModal') ? bootstrap.Modal.getOrCreateInstance(document.getElementById('accountsModal')) : null,
+
+        connectedProfileEmptyState: document.getElementById('connectedProfileEmptyState'),
+        connectedProfileDetails: document.getElementById('connectedProfileDetails'),
+        connectedProfileAlias: document.getElementById('connectedProfileAlias'),
+        connectedProfileAppId: document.getElementById('connectedProfileAppId'),
+        connectedProfileTenantId: document.getElementById('connectedProfileTenantId'),
+        connectedProfileSubId: document.getElementById('connectedProfileSubId'),
+        connectedProfileExpiration: document.getElementById('connectedProfileExpiration')
+    };
+
+    let selectedAccount = null;
+    let selectedVm = null;
+
+    function log(message, type = 'info') {
+        const timestamp = new Date().toLocaleTimeString();
+        const color = type === 'error' ? 'text-danger' : type === 'success' ? 'text-success' : 'text-info';
+        const logEntry = document.createElement('div');
+        logEntry.className = `mb-1 ${color}`;
+        logEntry.innerHTML = `[${timestamp}] ${message}`;
+        UI.logOutput.appendChild(logEntry);
         UI.logOutput.scrollTop = UI.logOutput.scrollHeight;
-    };
+    }
 
-    const apiCall = async (url, options = {}) => {
+    async function apiCall(endpoint, options = {}) {
         try {
-            const response = await fetch(url, options);
-            const data = await response.json();
-            if (!response.ok) {
-                log(data.error || `HTTP error! status: ${response.status}`, 'error');
-                throw new Error(data.error);
+            const response = await fetch(endpoint, options);
+            const contentType = response.headers.get("content-type");
+            if (contentType && contentType.indexOf("application/json") !== -1) {
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.error || `请求失败 (${response.status})`);
+                return data;
+            } else {
+                throw new Error(`返回非 JSON 数据 (HTTP ${response.status})。请检查后端路由或重新登录。`);
             }
-            if (data.error) log(data.error, 'error');
-            return data;
         } catch (error) {
-            log(error.message || '请求失败', 'error');
             throw error;
         }
-    };
+    }
 
-    const calculateUptime = (isoString) => {
-        if (!isoString) return 'N/A';
-        const startTime = new Date(isoString);
-        const now = new Date();
-        const diffMs = now - startTime;
-        const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-        const diffHrs = Math.floor((diffMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-        const diffMins = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
-        if (diffDays > 0) return `${diffDays}天${diffHrs}小时`;
-        if (diffHrs > 0) return `${diffHrs}小时${diffMins}分钟`;
-        return `${diffMins}分钟`;
-    };
+    function updateConnectedProfileUI(account) {
+        if (!account) return;
+        UI.currentAccountStatus.textContent = `已连接: ${account.name}`;
+        UI.connectedProfileEmptyState.classList.add('d-none');
+        UI.connectedProfileDetails.classList.remove('d-none');
 
-    const populateRegionSelectors = (regions) => {
-        if (!regions || regions.length === 0) {
-            UI.regionSelector.innerHTML = '<option value="">无法加载区域</option>'; return;
-        }
-        const optionsHtml = regions.sort((a, b) => a.display_name.localeCompare(b.display_name)).map(r => `<option value="${r.name}">${r.display_name}</option>`).join('');
-        UI.regionSelector.innerHTML = optionsHtml;
-    };
+        UI.connectedProfileAlias.textContent = account.name;
+        UI.connectedProfileAlias.title = account.name;
+        UI.connectedProfileAppId.textContent = account.client_id;
+        UI.connectedProfileAppId.title = account.client_id;
+        UI.connectedProfileTenantId.textContent = account.tenant_id;
+        UI.connectedProfileTenantId.title = account.tenant_id;
+        UI.connectedProfileSubId.textContent = account.subscription_id;
+        UI.connectedProfileSubId.title = account.subscription_id;
+        UI.connectedProfileExpiration.textContent = account.expiration_date || '永久 / 未设置';
+    }
 
-    const handleAccountSelected = async () => {
-        try {
-            log('正在获取可用区域列表...');
-            const regions = await apiCall('/azure/api/regions');
-            populateRegionSelectors(regions);
-            log('可用区域列表已更新', 'success');
-            loadVms();
-        } catch (e) {
-            log('获取区域列表失败，请检查账户权限或网络', 'error');
-            UI.regionSelector.innerHTML = '<option value="">获取区域失败</option>';
-        }
-    };
+    function updateActionButtons() {
+        const hasAccount = !!selectedAccount;
+        if(UI.refreshBtn) UI.refreshBtn.disabled = !hasAccount;
+        if(UI.queryAllStatusBtn) UI.queryAllStatusBtn.disabled = !hasAccount;
+        if(UI.createVmModalBtn) UI.createVmModalBtn.disabled = !hasAccount;
+        if(UI.createVmCardBtn) UI.createVmCardBtn.disabled = !hasAccount;
+        if(UI.disconnectAccountBtn) UI.disconnectAccountBtn.disabled = !hasAccount;
 
+        const hasVm = !!selectedVm;
+        if(UI.startBtn) UI.startBtn.disabled = !hasVm;
+        if(UI.stopBtn) UI.stopBtn.disabled = !hasVm;
+        if(UI.restartBtn) UI.restartBtn.disabled = !hasVm;
+        if(UI.changeIpBtn) UI.changeIpBtn.disabled = !hasVm;
+        if(UI.deleteBtn) UI.deleteBtn.disabled = !hasVm;
+    }
+
+    // ✨ 核心修复：纯本地 JS 计算存活状态，还原 V1 逻辑 ✨
     const displaySubscriptionStatus = (row) => {
         if (!row) return;
         const statusCell = row.querySelector('.status-cell');
         const expirationDate = row.dataset.expirationDate;
-        if (!expirationDate || expirationDate === 'null' || expirationDate === '') {
+        if (!expirationDate || expirationDate === 'null' || expirationDate === '' || expirationDate === 'undefined') {
             statusCell.innerHTML = `<span class="badge bg-secondary">未设置</span>`; return;
         }
         const today = new Date();
@@ -97,220 +112,244 @@ document.addEventListener('DOMContentLoaded', function() {
         today.setHours(0, 0, 0, 0);
         const diffDays = Math.ceil((expiry - today) / (1000 * 60 * 60 * 24));
         let statusText = `剩余 ${diffDays} 天`, badgeClass = 'bg-success';
-        if (diffDays < 0) { statusText = '已过期'; badgeClass = 'bg-danger'; } 
-        else if (diffDays <= 7) { badgeClass = 'bg-danger'; } 
+        if (diffDays < 0) { statusText = '已过期'; badgeClass = 'bg-danger'; }
+        else if (diffDays <= 7) { badgeClass = 'bg-danger'; }
         else if (diffDays <= 30) { badgeClass = 'bg-warning text-dark'; }
         statusCell.innerHTML = `<span class="badge ${badgeClass}">${statusText}</span>`;
     };
 
-    const loadAccounts = async () => {
-        try {
-            const accounts = await apiCall('/azure/api/accounts');
-            cachedAccounts = accounts;
-            UI.accountList.innerHTML = accounts.length === 0 ? '<tr><td colspan="3" class="text-center">没有已保存的账户</td></tr>' : '';
+    if (UI.queryAllStatusBtn) {
+        UI.queryAllStatusBtn.addEventListener('click', () => {
+            log("正在计算列表中所有账户的到期状态...");
+            UI.accountList.querySelectorAll('tr[data-account-name]').forEach(row => {
+                displaySubscriptionStatus(row);
+            });
+            if (UI.accountsModal) UI.accountsModal.show();
+        });
+    }
+
+    if (UI.disconnectAccountBtn) {
+        UI.disconnectAccountBtn.addEventListener('click', async () => {
+            if (!confirm('确定要断开当前 Azure 账号的连接吗？')) return;
+            try { await apiCall('/azure/api/session', { method: 'DELETE' }); } catch(e) {}
+
+            selectedAccount = null;
+            selectedVm = null;
+            UI.currentAccountStatus.textContent = '未连接';
+            UI.connectedProfileEmptyState.classList.remove('d-none');
+            UI.connectedProfileDetails.classList.add('d-none');
+            UI.vmList.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-5">请先连接账户并点击刷新</td></tr>';
+
+            updateActionButtons();
+            log('已断开当前 Azure 账户连接', 'success');
+        });
+    }
+
+    function loadAccounts() {
+        apiCall('/azure/api/accounts').then(accounts => {
+            UI.accountList.innerHTML = '';
+            if (accounts.length === 0) {
+                UI.accountList.innerHTML = '<tr><td colspan="6" class="text-center text-muted">暂无账户，请先添加</td></tr>';
+                return;
+            }
             accounts.forEach(acc => {
-                const row = document.createElement('tr');
-                row.dataset.accountName = acc.name;
-                row.dataset.expirationDate = acc.expiration_date || '';
-                row.innerHTML = `<td>${acc.name}</td><td class="status-cell text-center">--</td><td class="text-center"><div class="d-flex justify-content-center gap-1"><button class="btn btn-success btn-sm" data-action="select">选择</button><button class="btn btn-warning btn-sm" data-action="edit">修改</button><button class="btn btn-info btn-sm" data-action="query-status">查状态</button><button class="btn btn-danger btn-sm" data-action="delete">删除</button></div></td>`;
-                UI.accountList.appendChild(row);
-            });
-            const session = await apiCall('/azure/api/session');
-            if (session.logged_in) {
-                UI.currentAccountStatus.textContent = ` (当前: ${session.name})`;
-                [UI.refreshBtn, UI.regionSelector, UI.createVmBtn].forEach(el => el.disabled = false);
-                await handleAccountSelected();
-            } else {
-                UI.currentAccountStatus.textContent = '';
-                [UI.refreshBtn, UI.regionSelector, UI.createVmBtn].forEach(el => el.disabled = true);
-                UI.regionSelector.innerHTML = '<option>请先选择账户</option>';
-            }
-        } catch (e) {}
-    };
+                const tr = document.createElement('tr');
+                tr.dataset.accountName = acc.name;
+                tr.dataset.expirationDate = acc.expiration_date || '';
 
-    const loadVms = async () => {
-        selectedInstance = null;
-        updateActionButtonsState();
-        UI.vmList.innerHTML = `<tr><td colspan="7" class="text-center">正在加载... <div class="spinner-border spinner-border-sm"></div></td></tr>`;
-        try {
-            const vms = await apiCall('/azure/api/vms');
-            if (vms.length === 0) { UI.vmList.innerHTML = `<tr><td colspan="7" class="text-center">未找到任何虚拟机</td></tr>`; return; }
-            UI.vmList.innerHTML = '';
-            vms.forEach(vm => {
-                const isRunning = vm.status.toLowerCase().includes('running');
-                const row = document.createElement('tr');
-                Object.assign(row.dataset, { name: vm.name, group: vm.resource_group, status: vm.status });
-                const friendlyVmSize = VM_SIZE_MAP[vm.vm_size] || vm.vm_size;
-                const uptime = calculateUptime(vm.time_created);
-                row.innerHTML = `<td>${vm.name}</td><td>${vm.resource_group}</td><td>${vm.location}</td><td>${friendlyVmSize}</td><td>${uptime}</td><td>${vm.public_ip}</td><td><span class="badge bg-${isRunning ? 'success' : 'secondary'}">${vm.status}</span></td>`;
-                row.addEventListener('click', () => {
-                    if (selectedInstance) selectedInstance.classList.remove('table-active');
-                    row.classList.add('table-active');
-                    selectedInstance = row;
-                    updateActionButtonsState();
+                tr.innerHTML = `
+                    <td class="align-middle fw-bold text-primary">${acc.name}</td>
+                    <td class="align-middle">${(acc.client_id||'').substring(0, 6)}...</td>
+                    <td class="align-middle">${(acc.tenant_id||'').substring(0, 6)}...</td>
+                    <td class="status-cell align-middle text-center">--</td>
+                    <td class="align-middle">${acc.expiration_date ? `<span class="text-success">${acc.expiration_date}</span>` : '<span class="text-muted">未设置</span>'}</td>
+                    <td class="text-end">
+                        <button class="btn btn-sm btn-success connect-btn" data-name="${acc.name}"><i class="bi bi-link"></i> 连接</button>
+                        <button class="btn btn-sm btn-danger delete-btn" data-name="${acc.name}"><i class="bi bi-trash"></i></button>
+                    </td>
+                `;
+
+                tr.querySelector('.connect-btn').addEventListener('click', async () => {
+                    selectedAccount = acc;
+                    try { await apiCall('/azure/api/session', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: acc.name }) }); } catch(e) {}
+
+                    updateConnectedProfileUI(acc);
+                    updateActionButtons();
+                    log(`已成功连接到 Azure 账户: ${acc.name}`, 'success');
+
+                    if (UI.accountsModal) UI.accountsModal.hide();
+                    loadVms();
                 });
-                UI.vmList.appendChild(row);
+
+                tr.querySelector('.delete-btn').addEventListener('click', () => {
+                    if (confirm(`确定要删除账户 ${acc.name} 吗？`)) {
+                        apiCall(`/azure/api/accounts/${acc.name}`, { method: 'DELETE' }).then(() => {
+                            log(`账户 ${acc.name} 已删除`, 'success');
+                            if (selectedAccount && selectedAccount.name === acc.name) {
+                                if (UI.disconnectAccountBtn) UI.disconnectAccountBtn.click();
+                            }
+                            loadAccounts();
+                        });
+                    }
+                });
+                UI.accountList.appendChild(tr);
             });
-        } catch (e) { UI.vmList.innerHTML = `<tr><td colspan="7" class="text-center text-danger">加载失败，请选择账户或检查凭据</td></tr>`; }
-    };
-    
-    const updateActionButtonsState = () => {
-        const setButtonState = (button, activeClass, isEnabled) => {
-            button.disabled = !isEnabled;
-            button.className = isEnabled ? `btn ${activeClass}` : 'btn btn-secondary';
-        };
+        }).catch(err => {
+            log("加载账号失败: " + err.message, "error");
+            UI.accountList.innerHTML = `<tr><td colspan="6" class="text-center text-danger">加载失败: ${err.message}</td></tr>`;
+        });
+    }
 
-        if (!selectedInstance) {
-            [UI.startBtn, UI.stopBtn, UI.restartBtn, UI.changeIpBtn, UI.deleteBtn].forEach(btn => {
-                btn.disabled = true;
-                btn.className = 'btn btn-secondary';
+    if (UI.addAccountForm) {
+        UI.addAccountForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const formData = new FormData(e.target);
+            const data = Object.fromEntries(formData.entries());
+
+            // ✨ 核心修复：强制把 HTML 表单里的 account_name 转换成 Python 需要的 name ✨
+            if (data.account_name) {
+                data.name = data.account_name;
+                delete data.account_name;
+            }
+
+            const btn = document.getElementById('saveAccountBtn');
+            if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> 保存中...'; }
+
+            apiCall('/azure/api/accounts', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data)
+            }).then(() => {
+                log('Azure 账户添加成功', 'success');
+                e.target.reset();
+                if (UI.addAccountModal) UI.addAccountModal.hide();
+                loadAccounts();
+            }).catch(err => {
+                log('账户添加失败: ' + err.message, 'error');
+            }).finally(() => {
+                if (btn) { btn.disabled = false; btn.textContent = '保存账户'; }
             });
-            return;
-        }
+        });
+    }
 
-        const status = selectedInstance.dataset.status.toLowerCase();
-        const isRunning = status.includes('running');
-        const isStopped = status.includes('deallocated');
+    function loadVms() {
+        if (!selectedAccount) return log('请先连接一个 Azure 账号。', 'warning');
+        log("正在获取 Azure 虚拟机列表...");
+        UI.refreshBtn.disabled = true;
+        UI.vmList.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-5"><div class="spinner-border spinner-border-sm"></div> 正在加载...</td></tr>';
 
-        setButtonState(UI.startBtn, 'btn-success', isStopped);
-        setButtonState(UI.stopBtn, 'btn-warning', isRunning);
-        setButtonState(UI.restartBtn, 'btn-info', isRunning);
-        setButtonState(UI.changeIpBtn, 'btn-secondary', isRunning || isStopped);
-        setButtonState(UI.deleteBtn, 'btn-danger', true);
-    };
+        // 彻底还原 V1 调法：直接请求，不带 account_name 参数
+        apiCall(`/azure/api/vms`).then(vms => {
+            UI.vmList.innerHTML = '';
+            selectedVm = null;
+            updateActionButtons();
 
-    const handleVmAction = async (action) => {
-        if (!selectedInstance) return;
-        const vmName = selectedInstance.dataset.name, rgName = selectedInstance.dataset.group;
-        const confirmText = { start: `启动 ${vmName}?`, stop: `停止 ${vmName}?`, restart: `重启 ${vmName}?`, delete: `【警告】删除资源组 ${rgName}？此操作不可逆！` };
-        if (!confirm(`确定要${confirmText[action]}`)) return;
-        log(`正在对 ${vmName} 执行 ${action} 操作...`);
-        try {
-            const result = await apiCall('/azure/api/vm-action', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, vm_name: vmName, resource_group: rgName }) });
-            log(result.message, 'info');
-            if (result.task_id) {
-                pollTaskStatus(result.task_id);
+            if (vms.length === 0) {
+                UI.vmList.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-4">该订阅下未找到虚拟机</td></tr>';
+                return;
             }
-        } catch (e) {}
-    };
+            vms.forEach(vm => {
+                const tr = document.createElement('tr');
+                tr.style.cursor = 'pointer';
+                let stateColor = 'status-other';
+                if (vm.status.includes('running')) stateColor = 'status-running';
+                if (vm.status.includes('deallocated') || vm.status.includes('stopped')) stateColor = 'status-stopped';
 
-    const handleChangeIpAction = async () => {
-        if (!selectedInstance) return;
-        const vmName = selectedInstance.dataset.name, rgName = selectedInstance.dataset.group;
-        if (!confirm(`确定要为虚拟机 ${vmName} 更换一个新的公网IP吗？\n旧IP将被释放并删除。`)) return;
-        log(`正在为虚拟机 ${vmName} 更换IP...`);
-        try {
-            const result = await apiCall('/azure/api/vm-change-ip', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ vm_name: vmName, resource_group: rgName }) });
-            log(result.message, 'info');
-            if (result.task_id) {
-                pollTaskStatus(result.task_id);
+                tr.innerHTML = `
+                    <td class="fw-bold" style="padding-left: 1rem;">${vm.name}</td>
+                    <td class="text-center"><span class="badge bg-secondary">${vm.resource_group}</span></td>
+                    <td class="text-center"><div class="status-cell"><span class="status-dot ${stateColor}"></span>${vm.status}</div></td>
+                    <td class="text-center text-info">${vm.public_ip || '-'}</td>
+                    <td class="text-center">${vm.location}</td>
+                `;
+                tr.addEventListener('click', () => {
+                    document.querySelectorAll('#vmList tr').forEach(r => r.classList.remove('table-active'));
+                    tr.classList.add('table-active');
+                    selectedVm = vm;
+                    updateActionButtons();
+                });
+                UI.vmList.appendChild(tr);
+            });
+            log("虚拟机列表加载成功", 'success');
+        }).catch(error => {
+            UI.vmList.innerHTML = `<tr><td colspan="5" class="text-center text-danger">加载失败: ${error.message}</td></tr>`;
+            log(`加载虚拟机异常: ${error.message}`, 'error');
+        }).finally(() => {
+            UI.refreshBtn.disabled = false;
+        });
+    }
+
+    function handleVmAction(action) {
+        if (!selectedVm || !selectedAccount) return;
+        if (!confirm(`确定要对 VM [${selectedVm.name}] 执行 [${action}] 操作吗？`)) return;
+
+        log(`正在发送 ${action} 请求到 VM: ${selectedVm.name}...`);
+        apiCall('/azure/api/vm-action', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: action, resource_group: selectedVm.resource_group, vm_name: selectedVm.name })
+        }).then(res => {
+            log(res.message || '操作已成功发送', 'success');
+            setTimeout(loadVms, 2500);
+        }).catch(err => log(err.message, 'error'));
+    }
+
+    if(UI.refreshBtn) UI.refreshBtn.addEventListener('click', loadVms);
+    if(UI.startBtn) UI.startBtn.addEventListener('click', () => handleVmAction('start'));
+    if(UI.stopBtn) UI.stopBtn.addEventListener('click', () => handleVmAction('stop'));
+    if(UI.restartBtn) UI.restartBtn.addEventListener('click', () => handleVmAction('restart'));
+    if(UI.deleteBtn) UI.deleteBtn.addEventListener('click', () => handleVmAction('delete'));
+
+    if (UI.changeIpBtn) {
+        UI.changeIpBtn.addEventListener('click', () => {
+            if (!selectedVm || !selectedAccount) return;
+            if (!confirm(`确定要为 [${selectedVm.name}] 重新申请静态 IP 吗？`)) return;
+            log(`正在为 ${selectedVm.name} 更换 IP...`);
+
+            apiCall('/azure/api/vm-change-ip', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ resource_group: selectedVm.resource_group, vm_name: selectedVm.name })
+            }).then(res => {
+                log(res.message, 'success');
+                setTimeout(loadVms, 3000);
+            }).catch(err => log(err.message, 'error'));
+        });
+    }
+
+    if (UI.createVmBtn) {
+        UI.createVmBtn.addEventListener('click', async () => {
+            if (!selectedAccount) return log('错误：未连接账户，无法创建', 'error');
+            const region = UI.regionSelector.value;
+            const vmSize = document.getElementById('vmSize').value;
+            const vmOs = document.getElementById('vmOs').value;
+            const diskSize = document.getElementById('vmDiskSize').value;
+
+            log(`正在提交创建虚拟机任务: ${region} | ${vmSize} | ${vmOs}`);
+            if (UI.createVmModal) UI.createVmModal.hide();
+
+            let userDataB64 = "";
+            const userDataRaw = UI.userData ? UI.userData.value.trim() : "";
+            if (userDataRaw) {
+                userDataB64 = btoa(unescape(encodeURIComponent(userDataRaw)));
             }
-        } catch (e) {}
-    };
 
-    UI.addAccountForm.addEventListener('submit', async (event) => {
-        event.preventDefault();
-        const payload = { name: document.getElementById('accountName').value, client_id: document.getElementById('clientId').value, client_secret: document.getElementById('clientSecret').value, tenant_id: document.getElementById('tenantId').value, subscription_id: document.getElementById('subscriptionId').value, expiration_date: document.getElementById('expirationDate').value };
-        try { await apiCall('/azure/api/accounts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }); log('账户添加成功', 'success'); UI.addAccountForm.reset(); loadAccounts(); } catch (e) {}
-    });
+            const ipTypeSelector = document.getElementById('ipTypeSelector');
+            const ipType = ipTypeSelector ? ipTypeSelector.value : "Static";
 
-    UI.accountList.addEventListener('click', async (event) => {
-        const button = event.target.closest('button[data-action]');
-        if (!button) return;
-        const action = button.dataset.action; const row = button.closest('tr'); const accountName = row.dataset.accountName;
-        if (action === 'select') { try { await apiCall('/azure/api/session', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: accountName }) }); log(`账户 ${accountName} 已选择`, 'success'); loadAccounts(); } catch (e) {} }
-        else if (action === 'edit') {
-            const account = cachedAccounts.find(acc => acc.name === accountName);
-            if (account) {
-                UI.editOriginalAccountName.value = account.name; UI.editAccountName.value = account.name;
-                UI.editExpirationDate.value = account.expiration_date || '';
-                if (!editAccountModalInstance) editAccountModalInstance = new bootstrap.Modal(UI.editAccountModal);
-                editAccountModalInstance.show();
-            }
-        } else if (action === 'delete') { if (confirm(`确定要删除账户 ${accountName} 吗？`)) { try { await apiCall(`/azure/api/accounts/${accountName}`, { method: 'DELETE' }); log(`账户 ${accountName} 已删除`, 'success'); loadAccounts(); } catch (e) {} }
-        } else if (action === 'query-status') { displaySubscriptionStatus(row); }
-    });
-
-    UI.confirmEditAccountBtn.addEventListener('click', async () => {
-        const payload = { original_name: UI.editOriginalAccountName.value, new_name: UI.editAccountName.value, expiration_date: UI.editExpirationDate.value };
-        try { await apiCall('/azure/api/accounts/edit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }); log(`账户 ${payload.original_name} 已更新`, 'success'); editAccountModalInstance.hide(); loadAccounts(); } catch(e) {}
-    });
-
-    UI.queryAllStatusBtn.addEventListener('click', () => {
-        log(`正在为所有账户显示到期状态...`);
-        UI.accountList.querySelectorAll('tr[data-account-name]').forEach(row => { displaySubscriptionStatus(row); });
-    });
-
-    UI.createVmBtn.addEventListener('click', () => {
-        const selectedRegionName = UI.regionSelector.options[UI.regionSelector.selectedIndex].text;
-        UI.vmRegionDisplay.value = selectedRegionName;
-        if (!createVmModalInstance) createVmModalInstance = new bootstrap.Modal(UI.createVmModal);
-        createVmModalInstance.show();
-    });
-    
-    const pollTaskStatus = (taskId) => {
-        let notFoundCount = 0;
-        let lastLoggedStatus = '';
-        const interval = setInterval(async () => {
-            try {
-                const status = await apiCall(`/azure/api/task_status/${taskId}`);
-                if (status.status === 'success' || status.status === 'failure') {
-                    clearInterval(interval);
-                    log(status.result, status.status === 'success' ? 'success' : 'error');
-                    if (status.status === 'success') {
-                        setTimeout(loadVms, 5000); 
-                    }
-                } else if (status.status === 'running') {
-                    if(status.result && status.result !== lastLoggedStatus) {
-                        log(status.result, 'info');
-                        lastLoggedStatus = status.result;
-                    }
-                } else if (status.status === 'not_found') {
-                    notFoundCount++;
-                    if (notFoundCount > 3) {
-                        log(`错误：无法追踪任务 ${taskId} 的状态。`, 'error');
-                        clearInterval(interval);
-                    }
-                }
-            } catch (e) {
-                log(`查询任务状态失败: ${e.message}`, 'error');
-                clearInterval(interval);
-            }
-        }, 5000);
-    };
-
-    UI.confirmCreateVmBtn.addEventListener('click', async () => {
-        try {
-            const selectedIpTypeElement = document.querySelector('input[name="ipType"]:checked');
-            if (!selectedIpTypeElement) { log("错误：请选择一个公网IP类型。", "error"); return; }
-            const userData = UI.userData.value;
-            const userDataB64 = userData ? btoa(unescape(encodeURIComponent(userData))) : "";
             const payload = {
-                region: UI.regionSelector.value, vm_size: document.getElementById('vmSize').value,
-                os_image: document.getElementById('vmOs').value, disk_size: parseInt(document.getElementById('vmDiskSize').value, 10),
-                ip_type: selectedIpTypeElement.value, user_data: userDataB64
+                region: region, vm_size: vmSize,
+                os_image: vmOs, disk_size: parseInt(diskSize, 10),
+                ip_type: ipType, user_data: userDataB64
             };
-            if (!payload.region) { log('请先选择一个区域', 'error'); return; }
-            if (createVmModalInstance) createVmModalInstance.hide();
-            
-            const result = await apiCall('/azure/api/create-vm', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload) });
-            log(result.message, 'info'); 
-            if (result.task_id) {
-                pollTaskStatus(result.task_id);
-            }
-        } catch (e) {
-            console.error("创建虚拟机过程中发生错误:", e);
-        }
-    });
 
-    UI.refreshBtn.addEventListener('click', loadVms);
-    UI.startBtn.addEventListener('click', () => handleVmAction('start'));
-    UI.stopBtn.addEventListener('click', () => handleVmAction('stop'));
-    UI.restartBtn.addEventListener('click', () => handleVmAction('restart'));
-    UI.changeIpBtn.addEventListener('click', handleChangeIpAction);
-    UI.deleteBtn.addEventListener('click', () => handleVmAction('delete'));
-    UI.clearLogBtn.addEventListener('click', () => { UI.logOutput.innerHTML = '' });
+            apiCall('/azure/api/create-vm', {
+                method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)
+            }).then(res => {
+                log(res.message || '实例部署任务已提交后台执行', 'info');
+            }).catch(e => {
+                log("创建虚拟机任务提交失败: " + e.message, 'error');
+            });
+        });
+    }
+
+    if(UI.clearLogBtn) UI.clearLogBtn.addEventListener('click', () => { UI.logOutput.innerHTML = ''; });
 
     loadAccounts();
-    updateActionButtonsState();
 });
