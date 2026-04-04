@@ -6,7 +6,7 @@
 
 # --- 配置 ---
 INSTALL_DIR="/opt/cloud_manager"
-REPO_URL="https://github.com/SIJULY/cloud_manager.git"
+REPO_URL="https://github.com/SIJULY/cloud_manager_pro.git"
 ENV_FILE="$INSTALL_DIR/.env"
 
 # --- 辅助函数 ---
