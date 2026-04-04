@@ -1,6 +1,8 @@
 document.addEventListener('DOMContentLoaded', function() {
     // --- 1. DOM 元素获取 ---
     const profileList = document.getElementById('profileList');
+    if (profileList) profileList.dataset.fallbackConnectBound = '1';
+
     const currentProfileStatus = document.getElementById('currentProfileStatus');
     const profilesModalCurrentStatus = document.getElementById('profilesModalCurrentStatus');
     const connectedProfileEmptyState = document.getElementById('connectedProfileEmptyState');
@@ -223,6 +225,9 @@ document.addEventListener('DOMContentLoaded', function() {
     let selectedInstance = null;
     let currentSecurityList = null;
 
+    let globalCfStatus = null;
+    let globalTgStatus = null;
+
     const accountColors = {};
     const colorPalette = ['#007bff', '#28a745', '#dc3545', '#ffc107', '#17a2b8', '#6610f2', '#e83e8c'];
     let colorIndex = 0;
@@ -424,8 +429,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
                 if (response.task_ids && Array.isArray(response.task_ids)) {
                     response.task_ids.forEach(pollTaskStatus);
-
-                    // ✨ 修复 1：任务提交成功后，在后台静默刷新任务列表数据，确保打开管理弹窗时任务已存在
                     loadSnatchTasks();
                 }
             } catch (error) {
@@ -554,13 +557,13 @@ document.addEventListener('DOMContentLoaded', function() {
     async function refreshInstances() {
         addLog('正在刷新实例列表...');
         refreshInstancesBtn.disabled = true;
-        instanceList.innerHTML = `<tr><td colspan="5" class="text-center text-muted py-5"><div class="spinner-border spinner-border-sm"></div> 正在加载...</td></tr>`;
+        instanceList.innerHTML = `<tr><td colspan="6" class="text-center text-muted py-5"><div class="spinner-border spinner-border-sm"></div> 正在加载...</td></tr>`;
         try {
             const instances = await apiRequest('/oci/api/instances');
             currentInstances = instances;
             instanceList.innerHTML = '';
             if (instances.length === 0) {
-                 instanceList.innerHTML = `<tr><td colspan="5" class="text-center text-muted py-5">未找到任何实例</td></tr>`;
+                 instanceList.innerHTML = `<tr><td colspan="6" class="text-center text-muted py-5">未找到任何实例</td></tr>`;
             } else {
                 instances.forEach(inst => {
                     const tr = document.createElement('tr');
@@ -581,13 +584,32 @@ document.addEventListener('DOMContentLoaded', function() {
             addLog('实例列表刷新成功!', 'success');
         } catch (error) {
             currentInstances = [];
-            instanceList.innerHTML = `<tr><td colspan="5" class="text-center text-danger py-5">加载实例列表失败</td></tr>`;
+            instanceList.innerHTML = `<tr><td colspan="6" class="text-center text-danger py-5">加载实例列表失败</td></tr>`;
         } finally {
             refreshInstancesBtn.disabled = false;
         }
     }
 
     refreshInstancesBtn.addEventListener('click', refreshInstances);
+
+    // ✨ 修复：为“断开连接”按钮绑定事件 ✨
+    if (disconnectAccountBtn) {
+        disconnectAccountBtn.addEventListener('click', async () => {
+            if (!confirm('确定要断开当前 OCI 账号的连接吗？')) return;
+
+            addLog('正在断开连接...');
+            disconnectAccountBtn.disabled = true;
+            try {
+                const response = await apiRequest('/oci/api/session', { method: 'DELETE' });
+                addLog(response.message || '已成功断开连接。', 'success');
+                // 调用 checkSession(true) 强制重新校验并自动重置 UI 为未连接状态
+                await checkSession(true);
+            } catch (error) {
+                addLog('断开连接失败: ' + error.message, 'error');
+                disconnectAccountBtn.disabled = false;
+            }
+        });
+    }
 
     function updateStatCards({ profileCount = null, currentAlias = null, runningCount = null, completedCount = null, cloudflareConfigured = null, tgConfigured = null, defaultKeyConfigured = null } = {}) {
         if (profilesStatValue) {
@@ -605,9 +627,13 @@ document.addEventListener('DOMContentLoaded', function() {
         if (snatchStatSub && runningCount === null && completedCount === null) {
             snatchStatSub.textContent = '实时任务、日志、暂停恢复与删除';
         }
+
+        if (cloudflareConfigured !== null) globalCfStatus = cloudflareConfigured;
+        if (tgConfigured !== null) globalTgStatus = tgConfigured;
+
         if (networkStatValue) {
-            const cf = cloudflareConfigured === null ? 'CF 未知' : (cloudflareConfigured ? 'CF 已配置' : 'CF 未配置');
-            const tg = tgConfigured === null ? 'TG 未知' : (tgConfigured ? 'TG 已配置' : 'TG 未配置');
+            const cf = globalCfStatus === null ? 'CF 未知' : (globalCfStatus ? 'CF 已配置' : 'CF 未配置');
+            const tg = globalTgStatus === null ? 'TG 未知' : (globalTgStatus ? 'TG 已配置' : 'TG 未配置');
             networkStatValue.textContent = `${cf} / ${tg}`;
         }
         if (networkStatSub) {
@@ -639,7 +665,6 @@ document.addEventListener('DOMContentLoaded', function() {
             console.warn('refreshDashboardSummaries failed:', error);
         }
     }
-
 
     async function renderConnectedProfileDetails(alias) {
         if (!connectedProfileDetails || !connectedProfileEmptyState || !alias) return;
@@ -673,8 +698,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 connectedProfileFingerprint.textContent = profileData.fingerprint || '未设置';
                 connectedProfileFingerprint.title = profileData.fingerprint || '未设置';
             }
-            connectedProfileMeta.textContent = `租户ID: ${profileData.tenancy || 'N/A'} | 区域: ${profileData.region || 'N/A'} | 用户: ${profileData.user || 'N/A'}`;
-            connectedProfileMeta.title = connectedProfileMeta.textContent;
+            if (connectedProfileMeta) {
+                connectedProfileMeta.textContent = `租户ID: ${profileData.tenancy || 'N/A'} | 区域: ${profileData.region || 'N/A'} | 用户: ${profileData.user || 'N/A'}`;
+                connectedProfileMeta.title = connectedProfileMeta.textContent;
+            }
             connectedProfileEmptyState.classList.add('d-none');
             connectedProfileDetails.classList.remove('d-none');
         } catch (error) {
@@ -719,6 +746,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 enableMainControls(true, data.can_create);
                 await renderConnectedProfileDetails(data.alias);
                 await refreshDashboardSummaries(data.alias);
+
                 if (shouldRefreshInstances) {
                     await refreshInstances();
                 }
@@ -763,7 +791,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
 
         if (!enabled) {
-            instanceList.innerHTML = `<tr><td  class="text-center text-muted py-5">请先连接一个账号并刷新列表</td></tr>`;
+            instanceList.innerHTML = `<tr><td colspan="6" class="text-center text-muted py-5">请先连接一个账号并刷新列表</td></tr>`;
             Object.values(instanceActionButtons).forEach(btn => btn.disabled = true);
         }
     }
@@ -836,7 +864,6 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         } catch (e) { /* Not JSON, keep original message */ }
 
-        // ✨ 修复 2：实时将最新状态和进度同步到 UI 列表元素上 ✨
         const taskListItem = document.querySelector(`li[data-task-id="${taskId}"]`);
         if (taskListItem) {
             const statusTextEl = taskListItem.querySelector('.text-info-emphasis');
@@ -862,7 +889,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             }
         }
-        // --------------------------------------------------------
 
         if(window[lastLogKey] === currentMessage) return;
         window[lastLogKey] = currentMessage;
@@ -883,7 +909,6 @@ document.addEventListener('DOMContentLoaded', function() {
             addSnatchLog(`<strong>任务完成:</strong> ${apiResponse.result}`, accountAlias);
             delete snatchTaskAnnounced[taskId];
 
-            // 任务完成后稍微延迟自动重载列表，将其归档到“已完成”中
             setTimeout(() => {
                 if (document.getElementById('viewSnatchTasksModal').classList.contains('show')) {
                     loadSnatchTasks();
@@ -934,7 +959,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 });
             }
             updateStatCards({ profileCount: profiles.length });
-            checkSession(false);
         } catch (error) {
             console.error(error);
             profileList.innerHTML = `<tr><td colspan="4" class="text-center text-danger py-5"><div class="mb-2"><i class="bi bi-exclamation-triangle fs-3"></i></div><div>加载账号列表失败</div></td></tr>`;
@@ -1113,9 +1137,10 @@ document.addEventListener('DOMContentLoaded', function() {
             addLog(`账号 ${alias} 添加成功!`, 'success');
             [newProfileAlias, newProfileConfigText].forEach(el => el.value = '');
             newProfileKeyFile.value = '';
-            document.getElementById('accountSshKeyFile').value = ''; // Clear file inputs
+            document.getElementById('accountSshKeyFile').value = '';
             addAccountModal.hide();
             loadProfiles();
+            checkSession(false);
         } catch (error) {}
     }
 
@@ -1239,16 +1264,21 @@ document.addEventListener('DOMContentLoaded', function() {
             try {
                 const response = await apiRequest('/oci/api/session', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ alias }) });
                 addLog(response.message, 'success');
+
+                const modalEl = document.getElementById('profilesHubModal');
+                if (modalEl) {
+                    const modalInstance = bootstrap.Modal.getInstance(modalEl) || bootstrap.Modal.getOrCreateInstance(modalEl);
+                    if (modalInstance) modalInstance.hide();
+                }
+
                 await checkSession(true);
+
                 if (needsPolling && dateCell) {
                     pollForRegistrationDate(alias, dateCell);
                 }
+
             } catch (error) {
                 loadProfiles();
-            } finally {
-                if (!needsPolling) {
-                    checkSession(false);
-                }
             }
         }
         else if (proxyBtn) {
@@ -1287,6 +1317,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     await apiRequest(`/oci/api/profiles/${alias}`, { method: 'DELETE' });
                     addLog('删除成功!', 'success');
                     loadProfiles();
+                    checkSession(false);
                 } catch (error) {}
             };
             confirmActionModal.show();
@@ -1324,6 +1355,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 addLog(`账号 ${newAlias} 保存成功!`, 'success');
                 editProfileModal.hide();
                 loadProfiles();
+                checkSession(false);
             };
 
             if (keyFile) {
@@ -1352,6 +1384,7 @@ document.addEventListener('DOMContentLoaded', function() {
             });
             addLog(`账号 ${alias} 的代理设置已${remove ? '移除' : '更新'}！`, 'success');
             proxySettingsModal.hide();
+            checkSession(false);
         } catch (error) {}
     }
 
@@ -2027,7 +2060,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
 
         try {
-            await checkSession(false);
+            await checkSession(true);
         } catch (error) {
             console.warn('initializeOciDashboard checkSession failed:', error);
         }
