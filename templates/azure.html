@@ -1,0 +1,411 @@
+{% extends "layout.html" %}
+
+{% block title %}Azure VM Management Panel{% endblock %}
+
+{% block head_extra %}
+<style>
+    .azure-shell {
+        display: flex;
+        flex-direction: column;
+        gap: 1.5rem;
+    }
+    .azure-hero {
+        position: relative;
+        overflow: hidden;
+        padding: 2rem;
+        border-radius: 24px;
+        border: 1px solid rgba(56, 189, 248, 0.22);
+        background:
+            radial-gradient(circle at top right, rgba(59, 130, 246, 0.18), transparent 24%),
+            radial-gradient(circle at left center, rgba(56, 189, 248, 0.16), transparent 26%),
+            linear-gradient(135deg, rgba(15, 23, 42, 0.96), rgba(30, 41, 59, 0.9));
+        box-shadow: 0 20px 60px rgba(2, 6, 23, 0.34);
+    }
+    .azure-hero::after {
+        content: '';
+        position: absolute;
+        inset: auto -40px -40px auto;
+        width: 180px;
+        height: 180px;
+        border-radius: 50%;
+        background: radial-gradient(circle, rgba(56, 189, 248, 0.18), transparent 68%);
+        pointer-events: none;
+    }
+    .azure-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.45rem;
+        padding: 0.45rem 0.85rem;
+        border-radius: 999px;
+        border: 1px solid rgba(56, 189, 248, 0.28);
+        background: rgba(56, 189, 248, 0.1);
+        color: #bae6fd;
+        font-size: 0.76rem;
+        font-weight: 800;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+    }
+    .azure-hero-title {
+        font-size: clamp(2rem, 3vw, 3rem);
+        font-weight: 800;
+        color: #f8fafc;
+        margin: 0.9rem 0 0.55rem;
+    }
+    .azure-hero-desc {
+        color: #94a3b8;
+        max-width: 58rem;
+        line-height: 1.8;
+        margin-bottom: 0;
+    }
+    .azure-stat-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 1rem;
+    }
+    .azure-stat-card {
+        min-height: 130px;
+        padding: 1.1rem 1.25rem;
+        border-radius: 20px;
+        border: 1px solid rgba(148, 163, 184, 0.12);
+        background: linear-gradient(180deg, rgba(15, 23, 42, 0.92), rgba(30, 41, 59, 0.84));
+        box-shadow: 0 14px 36px rgba(2, 6, 23, 0.26);
+    }
+    .azure-stat-card.primary { border-color: rgba(249, 115, 22, 0.24); }
+    .azure-stat-card.info { border-color: rgba(56, 189, 248, 0.22); }
+    .azure-stat-card.success { border-color: rgba(16, 185, 129, 0.22); }
+    .azure-stat-card.warning { border-color: rgba(245, 158, 11, 0.24); }
+    .azure-stat-icon {
+        width: 42px;
+        height: 42px;
+        border-radius: 14px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        margin-bottom: 0.9rem;
+        color: #fff;
+        font-size: 1.05rem;
+        background: linear-gradient(135deg, rgba(234, 88, 12, 0.92), rgba(249, 115, 22, 0.82));
+        box-shadow: 0 12px 24px rgba(249, 115, 22, 0.2);
+    }
+    .azure-stat-card.info .azure-stat-icon { background: linear-gradient(135deg, rgba(37, 99, 235, 0.92), rgba(96, 165, 250, 0.82)); }
+    .azure-stat-card.success .azure-stat-icon { background: linear-gradient(135deg, rgba(5, 150, 105, 0.92), rgba(16, 185, 129, 0.82)); }
+    .azure-stat-card.warning .azure-stat-icon { background: linear-gradient(135deg, rgba(217, 119, 6, 0.92), rgba(245, 158, 11, 0.82)); }
+    .azure-stat-label {
+        color: #94a3b8;
+        font-size: 0.78rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        margin-bottom: 0.35rem;
+    }
+    .azure-stat-value {
+        color: #f8fafc;
+        font-size: 1.15rem;
+        font-weight: 800;
+    }
+    .azure-stat-sub {
+        color: #64748b;
+        font-size: 0.8rem;
+        margin-top: 0.2rem;
+    }
+    .azure-section-card {
+        border-radius: 22px;
+        overflow: hidden;
+    }
+    .azure-section-card .card-header {
+        padding: 1rem 1.25rem;
+    }
+    .azure-card-title {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        font-weight: 800;
+        color: #f8fafc;
+    }
+    .azure-card-title i {
+        width: 34px;
+        height: 34px;
+        border-radius: 12px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        background: rgba(56, 189, 248, 0.14);
+        color: #7dd3fc;
+    }
+    .azure-panel-note {
+        color: #64748b;
+        font-size: 0.82rem;
+    }
+    .azure-grid-2 {
+        display: grid;
+        grid-template-columns: 1.05fr 1.35fr;
+        gap: 1.5rem;
+    }
+    .azure-operation-grid {
+        display: grid;
+        grid-template-columns: 0.95fr 1.25fr;
+        gap: 1.5rem;
+    }
+    .azure-action-stack {
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+    }
+    .azure-sub-card {
+        padding: 1rem;
+        border-radius: 18px;
+        border: 1px solid rgba(148, 163, 184, 0.12);
+        background: rgba(15, 23, 42, 0.55);
+    }
+    .azure-sub-card-title {
+        font-size: 0.86rem;
+        color: #cbd5e1;
+        font-weight: 700;
+        margin-bottom: 0.75rem;
+        display: flex;
+        align-items: center;
+        gap: 0.55rem;
+    }
+    .azure-sub-card-title i {
+        color: #38bdf8;
+    }
+    .azure-userdata {
+        min-height: 285px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 0.84rem;
+        line-height: 1.65;
+    }
+    .vm-list-table { width: 100%; }
+    .vm-list-table th:nth-child(1) { width: 18%; } .vm-list-table th:nth-child(2) { width: 18%; }
+    .vm-list-table th:nth-child(3) { width: 11%; } .vm-list-table th:nth-child(4) { width: 18%; }
+    .vm-list-table th:nth-child(5) { width: 12%; } .vm-list-table th:nth-child(6) { width: 13%; }
+    .vm-list-table th:nth-child(7) { width: 10%; }
+    .vm-list-table th, .vm-list-table td { text-align: center; vertical-align: middle; }
+    .action-group {
+        display: flex;
+        justify-content: space-around;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+    }
+    .action-group .btn {
+        flex-grow: 1;
+        min-width: 130px;
+    }
+    .azure-log {
+        background: linear-gradient(180deg, rgba(2, 6, 23, 0.98), rgba(15, 23, 42, 0.96)) !important;
+        color: #86efac !important;
+        border-color: rgba(16, 185, 129, 0.16) !important;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 0.82rem;
+        line-height: 1.6;
+    }
+    .table-hover tbody tr { cursor: pointer; }
+    @media (max-width: 1199.98px) {
+        .azure-stat-grid,
+        .azure-grid-2,
+        .azure-operation-grid {
+            grid-template-columns: 1fr;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container py-2 py-lg-3">
+    <div class="azure-shell">
+        <section class="azure-hero">
+            <div class="azure-badge">
+                <i class="bi bi-microsoft"></i>
+                Azure VM Control Plane
+            </div>
+            <h1 class="azure-hero-title">Azure VM Management Panel</h1>
+            <p class="azure-hero-desc">将 Azure 账户接入、区域选择、虚拟机创建、实例运维与日志输出整合为统一的深色控制台工作区。在不改变任何功能逻辑的前提下，升级为更具科技感与产品一致性的云控制中心界面。</p>
+        </section>
+
+        <section class="azure-stat-grid">
+            <div class="azure-stat-card primary">
+                <div class="azure-stat-icon"><i class="bi bi-person-badge"></i></div>
+                <div class="azure-stat-label">账户接入</div>
+                <div class="azure-stat-value">Azure Profiles</div>
+                <div class="azure-stat-sub">统一保存租户、订阅与客户端凭证</div>
+            </div>
+            <div class="azure-stat-card info">
+                <div class="azure-stat-icon"><i class="bi bi-globe-americas"></i></div>
+                <div class="azure-stat-label">区域控制</div>
+                <div class="azure-stat-value">Region Selector</div>
+                <div class="azure-stat-sub">保持原区域加载与切换逻辑</div>
+            </div>
+            <div class="azure-stat-card success">
+                <div class="azure-stat-icon"><i class="bi bi-pc-display"></i></div>
+                <div class="azure-stat-label">实例创建</div>
+                <div class="azure-stat-value">Azure Virtual Machine</div>
+                <div class="azure-stat-sub">保留原弹窗与创建参数配置能力</div>
+            </div>
+            <div class="azure-stat-card warning">
+                <div class="azure-stat-icon"><i class="bi bi-journal-code"></i></div>
+                <div class="azure-stat-label">运维日志</div>
+                <div class="azure-stat-value">Operation Output</div>
+                <div class="azure-stat-sub">统一查看执行反馈与任务结果</div>
+            </div>
+        </section>
+
+        <section class="azure-grid-2">
+            <div class="card azure-section-card h-100">
+                <div class="card-header">
+                    <div class="azure-card-title"><i class="bi bi-plus-circle"></i><span>添加 Azure 账户</span></div>
+                    <div class="azure-panel-note mt-2">录入账户名称、客户端 ID、密码、租户 ID、订阅 ID 与到期日信息。</div>
+                </div>
+                <div class="card-body">
+                    <form id="addAccountForm">
+                        <div class="mb-2"><label class="form-label">账户名称</label><input type="text" id="accountName" class="form-control form-control-sm" required></div>
+                        <div class="mb-2"><label class="form-label">客户端 ID</label><input type="text" id="clientId" class="form-control form-control-sm" required></div>
+                        <div class="mb-2"><label class="form-label">客户端密码</label><input type="password" id="clientSecret" class="form-control form-control-sm" required></div>
+                        <div class="mb-2"><label class="form-label">租户 ID</label><input type="text" id="tenantId" class="form-control form-control-sm" required></div>
+                        <div class="mb-2"><label class="form-label">订阅 ID</label><input type="text" id="subscriptionId" class="form-control form-control-sm" required></div>
+                        <div class="mb-3"><label class="form-label">订阅到期日 (可选)</label><input type="date" id="expirationDate" class="form-control form-control-sm"></div>
+                        <div class="d-grid mt-4"><button type="submit" class="btn btn-primary">添加账户</button></div>
+                    </form>
+                </div>
+            </div>
+
+            <div class="card azure-section-card d-flex flex-column h-100">
+                <div class="card-header d-flex justify-content-between align-items-center gap-3 flex-wrap">
+                    <div>
+                        <div class="azure-card-title"><i class="bi bi-collection"></i><span>账户列表</span></div>
+                        <div class="azure-panel-note mt-2">保持原账户连接、编辑与到期状态查询逻辑。<small id="currentAccountStatus" class="ms-2 text-muted"></small></div>
+                    </div>
+                    <button id="queryAllStatusBtn" class="btn btn-sm btn-primary">一键显示所有到期日</button>
+                </div>
+                <div class="card-body p-0 flex-grow-1" style="overflow-y: auto; min-height: 455px;">
+                    <div class="table-responsive">
+                        <table class="table table-striped table-hover mb-0">
+                            <thead><tr><th>账户名称</th><th class="text-center">订阅到期状态</th><th class="text-center">操作</th></tr></thead>
+                            <tbody id="accountList"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="card azure-section-card">
+            <div class="card-header">
+                <div class="azure-card-title"><i class="bi bi-sliders"></i><span>操作区域</span></div>
+                <div class="azure-panel-note mt-2">保留原区域选择、创建虚拟机和 User Data 逻辑，仅重构为更清晰的控制台布局。</div>
+            </div>
+            <div class="card-body">
+                <div class="azure-operation-grid">
+                    <div class="azure-action-stack">
+                        <div class="azure-sub-card">
+                            <div class="azure-sub-card-title"><i class="bi bi-pin-map"></i>区域控制</div>
+                            <div class="row g-3 align-items-center">
+                                <div class="col-12 col-xl-auto"><label class="col-form-label mb-0">选择区域</label></div>
+                                <div class="col"><select class="form-select" id="regionSelector" disabled><option>请先选择账户</option></select></div>
+                            </div>
+                        </div>
+                        <div class="azure-sub-card">
+                            <div class="azure-sub-card-title"><i class="bi bi-cloud-upload"></i>创建实例</div>
+                            <div class="d-grid"><button id="createVmBtn" class="btn btn-success" disabled>创建 Azure 虚拟机</button></div>
+                        </div>
+                    </div>
+                    <div class="azure-sub-card h-100">
+                        <div class="azure-sub-card-title"><i class="bi bi-code-square"></i>开机脚本 (User Data)</div>
+                        <textarea id="userData" class="form-control azure-userdata" rows="10">#!/bin/bash
+# 标记文件路径，确保脚本只运行一次
+FLAG_FILE="/etc/.user-data-executed"
+if [ ! -f "$FLAG_FILE" ]; then
+    echo "--- Running First-Time Initialization ---"
+    echo "root:You22kme#12345" | sudo chpasswd
+    sudo sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin yes/g' /etc/ssh/sshd_config
+    sudo sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/g' /etc/ssh/sshd_config
+    sudo systemctl restart sshd || sudo service ssh restart
+    sudo touch "$FLAG_FILE"
+fi
+</textarea>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="card azure-section-card">
+            <div class="card-header d-flex justify-content-between align-items-center gap-3 flex-wrap">
+                <div>
+                    <div class="azure-card-title"><i class="bi bi-window-stack"></i><span>虚拟机列表</span></div>
+                    <div class="azure-panel-note mt-2">保留原虚拟机列表刷新、选择与实例操作逻辑。</div>
+                </div>
+                <button id="refreshVms" class="btn btn-sm btn-outline-primary" disabled>刷新列表</button>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0 vm-list-table">
+                        <thead><tr><th>名称</th><th>资源组</th><th>区域</th><th>实例类型</th><th>运行时间</th><th>公网IP</th><th>状态</th></tr></thead>
+                        <tbody id="vmList"></tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="card-footer text-center py-3">
+                <div class="action-group">
+                    <button type="button" id="startBtn" class="btn btn-success" disabled>启动</button>
+                    <button type="button" id="stopBtn" class="btn btn-warning" disabled>停止</button>
+                    <button type="button" id="restartBtn" class="btn btn-info" disabled>重启</button>
+                    <button type="button" id="changeIpBtn" class="btn btn-secondary" disabled>更换IP</button>
+                    <button type="button" id="deleteBtn" class="btn btn-danger" disabled>删除</button>
+                </div>
+            </div>
+<!-- ui-sync-marker -->        </section>
+
+        <section class="card azure-section-card">
+            <div class="card-header d-flex justify-content-between align-items-center gap-3 flex-wrap">
+                <div class="azure-card-title"><i class="bi bi-terminal-split"></i><span>日志输出</span></div>
+                <button id="clearLogBtn" class="btn btn-sm btn-outline-danger">清除日志</button>
+            </div>
+            <div class="card-body p-2"><pre id="logOutput" class="form-control mb-0 azure-log" style="height: 220px;"></pre></div>
+        </section>
+    </div>
+</div>
+<div class="modal fade" id="createVmModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header"><h5 class="modal-title">创建新的虚拟机</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+            <div class="modal-body">
+                <form id="createVmForm">
+                    <div class="row">
+                        <div class="col-md-6 mb-3"><label class="form-label">已选区域</label><input type="text" id="vmRegionDisplay" class="form-control" readonly></div>
+                        <div class="col-md-6 mb-3"><label class="form-label">实例类型</label><select id="vmSize" class="form-select" required><option value="Standard_B1s">B1s (1 vCPU, 1 GB RAM)<option value="Standard_B2pts_v2">B2pts v2 (2 vCPU, 4 GB RAM, ARM)</option><option value="Standard_B2ats_v2">B2ats v2 (2 vCPU, 4 GB RAM, AMD)</option></select></div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6 mb-3"><label class="form-label">操作系统</label><select id="vmOs" class="form-select" required><option value="debian12" selected>Debian 12</option><option value="debian11">Debian 11</option><option value="ubuntu22">Ubuntu 22.04 LTS</option><option value="ubuntu20">Ubuntu 20.04 LTS</option></select></div>
+                        <div class="col-md-6 mb-3"><label class="form-label">硬盘大小 (GB)</label><select id="vmDiskSize" class="form-select" required><option value="30">30 GB</option><option value="64" selected>64 GB</option><option value="128">128 GB</option></select></div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">公网IP类型</label>
+                        <div>
+                            <div class="form-check form-check-inline"><input class="form-check-input" type="radio" name="ipType" id="staticIp" value="Static" checked><label class="form-check-label" for="staticIp">静态IP</label></div>
+                            <div class="form-check form-check-inline"><input class="form-check-input" type="radio" name="ipType" id="dynamicIp" value="Dynamic"><label class="form-check-label" for="dynamicIp">动态IP</label></div>
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button><button type="button" id="confirmCreateVmBtn" class="btn btn-primary">确认创建</button></div>
+        </div>
+    </div>
+</div>
+<div class="modal fade" id="editAccountModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header"><h5 class="modal-title">修改账户信息</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+            <div class="modal-body">
+                <form id="editAccountForm">
+                    <input type="hidden" id="editOriginalAccountName">
+                    <div class="mb-3"><label class="form-label">账户名称</label><input type="text" class="form-control" id="editAccountName" required></div>
+                    <div class="mb-3"><label class="form-label">订阅到期日</label><input type="date" class="form-control" id="editExpirationDate"></div>
+                </form>
+            </div>
+            <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button><button type="button" id="confirmEditAccountBtn" class="btn btn-primary">保存更改</button></div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/azure_script.js') }}"></script>
+{% endblock %}
