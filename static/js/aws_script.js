@@ -1,505 +1,313 @@
-document.addEventListener('DOMContentLoaded', function() {
-    // UI元素引用
-    const UI = {
-        currentAccountStatus: document.getElementById('currentAccountStatus'),
-        saveAccountBtn: document.getElementById('saveAccountBtn'),
-        accountList: document.getElementById('accountList'),
-        queryAllQuotasBtn: document.getElementById('queryAllQuotasBtn'),
-        regionSelector: document.getElementById('regionSelector'),
-        activateRegionBtn: document.getElementById('activateRegionBtn'),
-        querySelectedRegionBtn: document.getElementById('querySelectedRegionBtn'),
-        queryAllRegionsBtn: document.getElementById('queryAllRegionsBtn'),
-        createEc2Btn: document.getElementById('createEc2Btn'),
-        createLsBtn: document.getElementById('createLsBtn'),
-        userData: document.getElementById('userData'),
-        instanceList: document.getElementById('instanceList'),
-        logOutput: document.getElementById('logOutput'),
-        clearLogBtn: document.getElementById('clearLogBtn'),
-        ec2TypeModal: new bootstrap.Modal(document.getElementById('ec2TypeModal')),
-        lightsailTypeModal: new bootstrap.Modal(document.getElementById('lightsailTypeModal')),
-        ec2TypeSelector: document.getElementById('ec2TypeSelector'),
-        ec2DiskSize: document.getElementById('ec2DiskSize'),
-        lightsailTypeSelector: document.getElementById('lightsailTypeSelector'),
-        confirmEc2CreationBtn: document.getElementById('confirmEc2CreationBtn'),
-        confirmLightsailCreationBtn: document.getElementById('confirmLightsailCreationBtn'),
-        ec2Spinner: document.getElementById('ec2Spinner'),
-        lightsailSpinner: document.getElementById('lightsailSpinner'),
-        paginationNav: document.getElementById('pagination-nav'),
-        startBtn: document.getElementById('startBtn'),
-        stopBtn: document.getElementById('stopBtn'),
-        restartBtn: document.getElementById('restartBtn'),
-        changeIpBtn: document.getElementById('changeIpBtn'),
-        deleteBtn: document.getElementById('deleteBtn'),
-    };
-    let logPollingInterval = null;
-    let currentPage = 1;
-    let selectedInstance = null;
+{% extends "layout.html" %}
 
-    // 辅助函数
-    const log = (message, type = 'info') => {
-        const now = new Date().toLocaleTimeString();
-        const colorClass = type === 'error' ? 'text-danger' : (type === 'success' ? 'text-success' : 'text-warning');
-        UI.logOutput.innerHTML += `<div class="${colorClass}">[${now}] ${message}</div>`;
-        UI.logOutput.scrollTop = UI.logOutput.scrollHeight;
-    };
+{% block title %}Azure 实例管理器 (Web版){% endblock %}
 
-    const apiCall = async (url, options = {}) => {
-        try {
-            const response = await fetch(url, options);
-            if (response.status === 401) {
-                log('会话已过期，正在跳转到登录页...', 'error');
-                window.location.href = '/login';
-                throw new Error("Redirecting to login");
-            }
-            if (!response.ok) {
-                let errorMsg = `HTTP 错误! 状态: ${response.status}`;
-                try { const errData = await response.json(); errorMsg = errData.error || JSON.stringify(errData); }
-                catch (e) { errorMsg = await response.text(); }
-                throw new Error(errorMsg);
-            }
-            const data = await response.json();
-            if (data.error) {
-                log(data.error, 'error');
-            }
-            return data;
-        } catch (error) { log(error.message, 'error'); throw error; }
-    };
+{% block head_extra %}
+<style>
+    .azure-shell { display: flex; flex-direction: column; gap: 1.5rem; }
+    .azure-hero {
+        position: relative; overflow: hidden; padding: 2rem; border-radius: 24px;
+        border: 1px solid rgba(56, 189, 248, 0.22);
+        background: radial-gradient(circle at top right, rgba(59, 130, 246, 0.18), transparent 24%),
+                    radial-gradient(circle at left center, rgba(56, 189, 248, 0.16), transparent 26%),
+                    linear-gradient(135deg, rgba(15, 23, 42, 0.96), rgba(30, 41, 59, 0.9));
+        box-shadow: 0 20px 60px rgba(2, 6, 23, 0.34);
+    }
+    .azure-hero::after {
+        content: ''; position: absolute; inset: auto -40px -40px auto; width: 180px; height: 180px;
+        border-radius: 50%; background: radial-gradient(circle, rgba(56, 189, 248, 0.16), transparent 68%); pointer-events: none;
+    }
+    .oci-badge {
+        display: inline-flex; align-items: center; gap: 0.45rem; padding: 0.45rem 0.85rem; border-radius: 999px;
+        border: 1px solid rgba(56, 189, 248, 0.28); background: rgba(56, 189, 248, 0.1); color: #7dd3fc;
+        font-size: 0.76rem; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase;
+    }
+    .oci-hero-title { font-size: clamp(2rem, 3vw, 3rem); font-weight: 800; color: #f8fafc; margin: 0.9rem 0 0.55rem; }
+    .oci-hero-desc { color: #94a3b8; max-width: 62rem; line-height: 1.8; margin-bottom: 0; }
+    .oci-stat-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; }
+    .oci-stat-card {
+        min-height: 130px; padding: 1.1rem 1.25rem; border-radius: 20px; border: 1px solid rgba(148, 163, 184, 0.12);
+        background: linear-gradient(180deg, rgba(15, 23, 42, 0.92), rgba(30, 41, 59, 0.84)); box-shadow: 0 14px 36px rgba(2, 6, 23, 0.26); cursor: pointer; transition: outline 0.2s ease;
+    }
+    .oci-stat-card.primary { border-color: rgba(56, 189, 248, 0.24); }
+    .oci-stat-card.info { border-color: rgba(99, 102, 241, 0.22); }
+    .oci-stat-card.success { border-color: rgba(16, 185, 129, 0.22); }
+    .oci-stat-icon {
+        width: 42px; height: 42px; border-radius: 14px; display: inline-flex; align-items: center; justify-content: center;
+        margin-bottom: 0.9rem; color: #fff; font-size: 1.05rem;
+        background: linear-gradient(135deg, rgba(56, 189, 248, 0.92), rgba(2, 132, 199, 0.82)); box-shadow: 0 12px 24px rgba(56, 189, 248, 0.2);
+    }
+    .oci-stat-card.info .oci-stat-icon { background: linear-gradient(135deg, rgba(99, 102, 241, 0.92), rgba(79, 70, 229, 0.82)); box-shadow: 0 12px 24px rgba(99, 102, 241, 0.2); }
+    .oci-stat-card.success .oci-stat-icon { background: linear-gradient(135deg, rgba(5, 150, 105, 0.92), rgba(16, 185, 129, 0.82)); box-shadow: 0 12px 24px rgba(16, 185, 129, 0.2); }
+    .oci-stat-label { color: #94a3b8; font-size: 0.78rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 0.35rem; }
+    .oci-stat-value { color: #f8fafc; font-size: 1.15rem; font-weight: 800; }
+    .oci-stat-sub { color: #64748b; font-size: 0.8rem; margin-top: 0.2rem; }
+    .oci-section-card { border-radius: 22px; overflow: hidden; }
+    .oci-section-card .card-header { padding: 1rem 1.25rem; }
+    .oci-card-title { display: flex; align-items: center; gap: 0.75rem; font-weight: 800; color: #f8fafc; }
+    .oci-card-title i { width: 34px; height: 34px; border-radius: 12px; display: inline-flex; align-items: center; justify-content: center; background: rgba(56, 189, 248, 0.14); color: #38bdf8; }
+    .oci-panel-note { color: #64748b; font-size: 0.82rem; }
+    .connected-profile-card .card { background: rgba(15, 23, 42, 0.58); border: 1px solid rgba(148, 163, 184, 0.12); box-shadow: none; }
+    .connected-profile-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.9rem; }
+    .connected-profile-summary-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.9rem; }
+    .connected-profile-item { min-height: 78px; padding: 0.75rem 0.9rem; border-radius: 16px; border: 1px solid rgba(148, 163, 184, 0.12); background: rgba(15, 23, 42, 0.52); }
+    .connected-profile-item-label { font-size: 0.76rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 0.45rem; }
+    .connected-profile-item-value { color: #e2e8f0; font-weight: 600; line-height: 1.35; word-break: break-word; font-size: 0.92rem; }
+    .connected-profile-item-value.compact { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .oci-empty-state { border: 1px dashed rgba(148, 163, 184, 0.2); border-radius: 18px; background: rgba(15, 23, 42, 0.42); color: #94a3b8; }
+    .oci-empty-state strong { color: #e2e8f0; }
+    .action-group { display: flex; flex-wrap: wrap; gap: 0.75rem; }
+    .action-group .btn { flex: 1 1 0; min-width: 0; }
+    .oci-log { background: linear-gradient(180deg, rgba(2, 6, 23, 0.98), rgba(15, 23, 42, 0.96)) !important; color: #86efac !important; border-color: rgba(16, 185, 129, 0.16) !important; font-family: ui-monospace, SFMono-Regular, monospace; }
+    .modal-content { background: linear-gradient(180deg, rgba(15, 23, 42, 0.98), rgba(15, 23, 42, 0.94)); border: 1px solid rgba(148, 163, 184, 0.16); box-shadow: 0 28px 80px rgba(2, 6, 23, 0.5); }
+    .modal-header { border-bottom: 1px solid rgba(148, 163, 184, 0.12); background: rgba(2, 6, 23, 0.24); }
+    .modal-footer { border-top: 1px solid rgba(148, 163, 184, 0.12); background: rgba(2, 6, 23, 0.16); }
+    .oci-modal-lead { color: #94a3b8; font-size: 0.84rem; margin-top: 0.35rem; }
+    @media (max-width: 1199.98px) { .oci-stat-grid { grid-template-columns: 1fr 1fr; } .connected-profile-summary, .connected-profile-summary-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+    @media (max-width: 767.98px) { .oci-stat-grid { grid-template-columns: 1fr; } .connected-profile-summary, .connected-profile-summary-3 { grid-template-columns: 1fr; } }
+</style>
+{% endblock %}
 
-    const formatDuration = (isoString) => {
-        if (!isoString) return 'N/A';
-        const launchTime = new Date(isoString);
-        const now = new Date();
-        let seconds = Math.floor((now - launchTime) / 1000);
-        if (seconds < 0) return '未来时间';
-        if (seconds < 60) return `${seconds} 秒`;
-        let days = Math.floor(seconds / (24 * 3600));
-        seconds %= (24 * 3600);
-        let hours = Math.floor(seconds / 3600);
-        seconds %= 3600;
-        let minutes = Math.floor(seconds / 60);
-        let result = '';
-        if (days > 0) result += `${days}天 `;
-        if (hours > 0) result += `${hours}小时 `;
-        if (minutes > 0) result += `${minutes}分钟`;
-        return result.trim() || '刚刚启动';
-    };
+{% block content %}
+<div class="container py-2 py-lg-3">
+    <div class="azure-shell">
+        <section class="azure-hero">
+            <div class="oci-badge"><i class="bi bi-microsoft"></i>Azure Control Plane</div>
+            <h1 class="oci-hero-title">Azure 实例管理器</h1>
+            <p class="oci-hero-desc">管理您的 Azure Service Principal 凭证，快速创建虚拟机。采用全新一代深色科技面板设计，体验更加流畅、操作更加直观。</p>
+        </section>
 
-    const renderInstanceRow = (inst) => {
-        const row = document.createElement('tr');
-        row.dataset.id = inst.id;
-        row.dataset.name = inst.name || inst.id;
-        row.dataset.region = inst.region;
-        row.dataset.type = inst.type;
-        row.dataset.state = inst.state;
-        
-        const uptime = (inst.state === 'running' || inst.state === 'pending') ? formatDuration(inst.launch_time) : '已停止';
-        const isRunning = inst.state === 'running';
+        <section class="oci-stat-grid">
+            <button type="button" class="oci-stat-card primary text-start border-0 w-100" data-bs-toggle="modal" data-bs-target="#accountsModal">
+                <div class="oci-stat-icon"><i class="bi bi-person-workspace"></i></div>
+                <div class="oci-stat-label">服务主体管理</div>
+                <div class="oci-stat-value">Azure Profiles</div>
+                <div class="oci-stat-sub">添加并切换 Service Principal 账号</div>
+            </button>
+            <button type="button" class="oci-stat-card info text-start border-0 w-100" id="queryAllStatusBtn" disabled>
+                <div class="oci-stat-icon"><i class="bi bi-activity"></i></div>
+                <div class="oci-stat-label">订阅存活状态</div>
+                <div class="oci-stat-value">Sub Status</div>
+                <div class="oci-stat-sub">一键查询所有账单及存活状态</div>
+            </button>
+            <button type="button" class="oci-stat-card success text-start border-0 w-100" id="createVmModalBtn" data-bs-toggle="modal" data-bs-target="#createVmModal" disabled>
+                <div class="oci-stat-icon"><i class="bi bi-pc-display-horizontal"></i></div>
+                <div class="oci-stat-label">部署虚拟机</div>
+                <div class="oci-stat-value">Launch VM</div>
+                <div class="oci-stat-sub">在当前连接账户中快速部署</div>
+            </button>
+        </section>
 
-        row.innerHTML = `
-            <td><span class="badge bg-${inst.type === 'EC2' ? 'success' : 'info'}">${inst.type}</span></td>
-            <td class="text-center">${inst.region}</td>
-            <td class="text-center">${inst.name || inst.id}</td>
-            <td class="text-center"><span class="badge bg-${isRunning ? 'success' : (inst.state === 'stopped' ? 'secondary' : 'warning')}">${inst.state}</span></td>
-            <td class="text-center">${inst.ip}</td>
-            <td class="text-center">${uptime}</td>
-        `;
-        row.style.cursor = 'pointer';
-        row.addEventListener('click', () => {
-            if (selectedInstance) {
-                selectedInstance.classList.remove('table-active');
-            }
-            row.classList.add('table-active');
-            selectedInstance = row;
-            updateActionButtonsState();
-        });
-        UI.instanceList.appendChild(row);
-    };
+        <section class="card oci-section-card connected-profile-card">
+            <div class="card-header d-flex justify-content-between align-items-center gap-3 flex-wrap">
+                <div>
+                    <div class="oci-card-title"><i class="bi bi-person-badge"></i><span>当前连接账户</span></div>
+                    <div class="oci-panel-note mt-2">此处仅展示当前已连接 Azure 服务主体的概览信息。<span id="currentAccountStatus" class="ms-2 text-muted">未连接</span></div>
+                </div>
+                <div class="d-flex gap-2 flex-wrap align-items-center">
+                    <button id="createVmCardBtn" class="btn btn-success btn-sm profile-action-btn" disabled data-bs-toggle="modal" data-bs-target="#createVmModal"><i class="bi bi-plus-circle"></i> 创建虚拟机</button>
+                    <button id="disconnectAccountBtn" class="btn btn-danger btn-sm profile-action-btn" disabled><i class="bi bi-power"></i> 断开连接</button>
+                </div>
+            </div>
 
-    const updateActionButtonsState = () => {
-        const setButtonState = (button, activeClass, isEnabled) => {
-            button.disabled = !isEnabled;
-            button.classList.remove('btn-success', 'btn-warning', 'btn-secondary', 'btn-info', 'btn-danger');
-            if (isEnabled) {
-                button.classList.add(activeClass);
-            } else {
-                button.classList.add('btn-secondary');
-            }
-        };
+            <div class="card-body">
+                <div id="connectedProfileEmptyState" class="oci-empty-state text-center py-5"><div class="mb-2"><i class="bi bi-microsoft fs-2"></i></div><strong>尚未连接 Azure 账号</strong><div class="small mt-2">请先在“服务主体管理”弹出窗口中选择并连接一个账号。</div></div>
+                <div id="connectedProfileDetails" class="d-none">
+                    <div class="connected-profile-summary mb-3">
+                        <div class="connected-profile-item"><div class="connected-profile-item-label">账户名称</div><div id="connectedProfileAlias" class="connected-profile-item-value compact">-</div></div>
+                        <div class="connected-profile-item"><div class="connected-profile-item-label">Client ID (App)</div><div id="connectedProfileAppId" class="connected-profile-item-value compact">-</div></div>
+                        <div class="connected-profile-item"><div class="connected-profile-item-label">Tenant ID</div><div id="connectedProfileTenantId" class="connected-profile-item-value compact">-</div></div>
+                        <div class="connected-profile-item"><div class="connected-profile-item-label">Subscription ID</div><div id="connectedProfileSubId" class="connected-profile-item-value compact">-</div></div>
+                    </div>
+                    <div class="connected-profile-summary-3">
+                        <div class="connected-profile-item"><div class="connected-profile-item-label">连接状态</div><div class="connected-profile-item-value"><span class="badge bg-success-subtle text-success border border-success-subtle">已连接</span></div></div>
+                        <div class="connected-profile-item"><div class="connected-profile-item-label">到期时间</div><div id="connectedProfileExpiration" class="connected-profile-item-value compact">-</div></div>
+                        <div class="connected-profile-item"><div class="connected-profile-item-label">备注</div><div class="connected-profile-item-value text-muted small">Azure Service Principal</div></div>
+                    </div>
+                </div>
+            </div>
+        </section>
 
-        if (!selectedInstance) {
-            setButtonState(UI.startBtn, 'btn-success', false);
-            setButtonState(UI.stopBtn, 'btn-warning', false);
-            setButtonState(UI.restartBtn, 'btn-success', false);
-            setButtonState(UI.changeIpBtn, 'btn-info', false);
-            setButtonState(UI.deleteBtn, 'btn-danger', false);
-            return;
-        }
+        <section class="card oci-section-card">
+            <div class="card-header d-flex justify-content-between align-items-center gap-3 flex-wrap">
+                <div>
+                    <div class="oci-card-title"><i class="bi bi-server"></i><span>虚拟机列表</span></div>
+                    <div class="oci-panel-note mt-2">管理当前订阅下的所有虚拟机，支持更换公网 IP。</div>
+                </div>
+                <div class="d-flex gap-2 flex-wrap">
+                    <button id="refreshVms" class="btn btn-sm btn-primary" disabled><i class="bi bi-arrow-clockwise"></i> 刷新列表</button>
+                </div>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead>
+                            <tr>
+                                <th style="width: 20%; padding-left: 1rem;">VM名称</th>
+                                <th class="text-center">资源组</th>
+                                <th class="text-center">状态</th>
+                                <th class="text-center">公网 IP</th>
+                                <th class="text-center">区域</th>
+                            </tr>
+                        </thead>
+                        <tbody id="vmList"><tr><td colspan="5" class="text-center text-muted py-5">请先连接账户并点击刷新</td></tr></tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="card-footer text-center py-3">
+                <div id="instanceActionGroup" class="action-group">
+                    <button type="button" id="startBtn" class="btn btn-success" disabled>启动</button>
+                    <button type="button" id="stopBtn" class="btn btn-danger" disabled>关机</button>
+                    <button type="button" id="restartBtn" class="btn btn-warning" disabled>重启</button>
+                    <button type="button" id="changeIpBtn" class="btn btn-info" disabled>更换静态IP</button>
+                    <button type="button" id="deleteBtn" class="btn btn-danger" disabled>删除VM</button>
+                </div>
+            </div>
+        </section>
 
-        const state = selectedInstance.dataset.state;
-        const type = selectedInstance.dataset.type;
-        const isRunning = state === 'running';
-        const isStopped = state === 'stopped';
+        <section class="card oci-section-card">
+            <div class="card-header d-flex justify-content-between align-items-center gap-3 flex-wrap">
+                <div class="oci-card-title"><i class="bi bi-terminal-split"></i><span>任务与日志输出</span></div>
+                <button id="clearLogBtn" class="btn btn-sm btn-outline-secondary">清除日志</button>
+            </div>
+            <div class="card-body p-2">
+                <div id="logOutput" class="form-control oci-log" style="height: 250px; overflow-y: auto;"></div>
+            </div>
+        </section>
+    </div>
+</div>
 
-        setButtonState(UI.startBtn, 'btn-success', isStopped);
-        setButtonState(UI.stopBtn, 'btn-warning', isRunning);
-        setButtonState(UI.restartBtn, 'btn-success', isRunning);
-        setButtonState(UI.deleteBtn, 'btn-danger', !(isRunning && type === 'EC2'));
-        setButtonState(UI.changeIpBtn, 'btn-info', isRunning && type === 'EC2');
-    };
+<div class="modal fade" id="accountsModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-xl">
+        <div class="modal-content">
+            <div class="modal-header align-items-center">
+                <div class="flex-grow-1">
+                    <h5 class="modal-title">Azure 账户管理</h5>
+                    <div class="oci-modal-lead">在此连接、切换和删除您的 Azure Service Principal 凭证。</div>
+                </div>
+                <div class="d-flex align-items-center gap-3 pe-3">
+                    <button class="btn btn-sm rounded-pill text-white px-3 py-2 fw-bold" style="background: linear-gradient(135deg, #0ea5e9, #3b82f6); border: none; box-shadow: 0 4px 12px rgba(59, 130, 246, 0.25);" data-bs-toggle="modal" data-bs-target="#addAccountModal">
+                        <i class="bi bi-person-plus-fill me-1"></i> 添加新账户
+                    </button>
+                </div>
+                <button type="button" class="btn-close m-0 ms-2" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead><tr><th>账户名称</th><th>Client ID</th><th>Tenant ID</th><th>Subscription ID</th><th>到期时间</th><th class="text-end">操作</th></tr></thead>
+                        <tbody id="accountList"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
 
-    const handleActionClick = async (action) => {
-        if (!selectedInstance) {
-            log('错误：请先在列表中选择一个实例。', 'error');
-            return;
-        }
-        const instance = {
-            id: selectedInstance.dataset.id,
-            name: selectedInstance.dataset.name,
-            region: selectedInstance.dataset.region,
-            type: selectedInstance.dataset.type,
-        };
-        const confirmText = {
-            start: `确定要启动实例 ${instance.name}?`,
-            stop: `确定要停止实例 ${instance.name}?`,
-            restart: `确定要重启实例 ${instance.name}?`,
-            delete: `【警告】此操作不可恢复！确定要永久删除实例 ${instance.name} 吗?`,
-            'change-ip': `确定要为实例 ${instance.name} 分配一个新的IP地址吗？这会产生少量费用，并自动释放旧IP。`
-        };
-        if (!confirm(confirmText[action])) return;
-        log(`正在对实例 ${instance.name} 执行 ${action} 操作...`);
-        try {
-            const payload = {
-                action: action,
-                instance_id: instance.id,
-                region: instance.region,
-                instance_type: instance.type
-            };
-            const response = await apiCall('/aws/api/instance-action', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            });
-            if (response && response.message) {
-                log(response.message, 'success');
-            }
-            setTimeout(() => UI.querySelectedRegionBtn.dispatchEvent(new Event('click')), 5000);
-        } catch (error) {
-            setTimeout(() => UI.querySelectedRegionBtn.dispatchEvent(new Event('click')), 500);
-        }
-    };
-    
-    const startLogPolling = (taskId) => {
-        if (logPollingInterval) {
-            clearInterval(logPollingInterval);
-            logPollingInterval = null;
-        }
-        UI.instanceList.innerHTML = `<tr><td colspan="6" class="text-center" data-loading-row="true">查询中... <div class="spinner-border spinner-border-sm"></div></td></tr>`;
-        
-        logPollingInterval = setInterval(async () => {
-            try {
-                const data = await apiCall(`/aws/api/task/${taskId}/logs`);
-                if (data && data.logs) {
-                    const loadingRow = UI.instanceList.querySelector('td[data-loading-row="true"]');
-                    if (loadingRow) {
-                        loadingRow.parentNode.remove();
-                    }
+<div class="modal fade" id="addAccountModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">添加 Azure 账户</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="addAccountForm">
+                    <div class="mb-3">
+                        <label class="form-label">账户名称 (自定义)</label>
+                        <input type="text" class="form-control" name="account_name" placeholder="例如: azure-sub-1" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Client ID (App ID)</label>
+                        <input type="text" class="form-control" name="client_id" placeholder="输入您的应用程序 ID" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Client Secret</label>
+                        <input type="password" class="form-control" name="client_secret" placeholder="输入客户端密码值" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Tenant ID</label>
+                        <input type="text" class="form-control" name="tenant_id" placeholder="输入租户 ID" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Subscription ID</label>
+                        <input type="text" class="form-control" name="subscription_id" placeholder="输入订阅 ID" required>
+                    </div>
+                    <div class="text-end mt-4">
+                        <button type="button" class="btn btn-secondary me-2" data-bs-dismiss="modal">取消</button>
+                        <button type="submit" class="btn btn-primary" id="saveAccountBtn">保存账户</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
 
-                    data.logs.forEach(logLine => {
-                        if (logLine.startsWith("FOUND_INSTANCE::")) {
-                            try {
-                                const instanceData = JSON.parse(logLine.substring("FOUND_INSTANCE::".length));
-                                if (!document.querySelector(`[data-id="${instanceData.id}"]`)) {
-                                    renderInstanceRow(instanceData);
-                                }
-                            } catch (e) {
-                                log("无法解析实例数据: " + logLine, 'error');
-                            }
-                        } else {
-                            log(logLine);
-                        }
-                    });
-
-                    if (data.logs.includes("--- 任务完成 ---")) {
-                        clearInterval(logPollingInterval);
-                        logPollingInterval = null;
-                        log("所有区域查询任务已完成。", 'success');
-                        
-                        if (UI.instanceList.rows.length === 0) {
-                            UI.instanceList.innerHTML = `<tr><td colspan="6" class="text-center text-muted">未找到实例</td></tr>`;
-                        }
-                    }
-                }
-            } catch (error) {
-                clearInterval(logPollingInterval);
-                logPollingInterval = null;
-                log("日志轮询失败或任务已结束。", 'error');
-            }
-        }, 1000);
-    };
-    
-    const setUIState = (isAwsLoggedIn) => {
-        [UI.createEc2Btn, UI.createLsBtn, UI.querySelectedRegionBtn, UI.queryAllRegionsBtn, UI.regionSelector].forEach(el => el.disabled = !isAwsLoggedIn);
-        UI.activateRegionBtn.disabled = true;
-    };
-    const renderPagination = (totalPages, currentPage) => {
-        UI.paginationNav.innerHTML = '';
-        if (totalPages <= 1) return;
-        let paginationHTML = '<ul class="pagination pagination-sm">';
-        paginationHTML += `<li class="page-item ${currentPage === 1 ? 'disabled' : ''}">
-            <a class="page-link" href="#" data-page="${currentPage - 1}">‹</a></li>`;
-        for (let i = 1; i <= totalPages; i++) {
-            paginationHTML += `<li class="page-item ${i === currentPage ? 'active' : ''}">
-                <a class="page-link" href="#" data-page="${i}">${i}</a></li>`;
-        }
-        paginationHTML += `<li class="page-item ${currentPage === totalPages ? 'disabled' : ''}">
-            <a class="page-link" href="#" data-page="${currentPage + 1}">›</a></li>`;
-        paginationHTML += '</ul>';
-        UI.paginationNav.innerHTML = paginationHTML;
-    };
-    const loadAndRenderAccounts = async (page = 1) => {
-        try {
-            const data = await apiCall(`/aws/api/accounts?page=${page}&limit=5`);
-            if (!data) return;
-            currentPage = data.current_page;
-            UI.accountList.innerHTML = data.accounts.length ? data.accounts.map(acc => `
-                <tr data-account-name="${acc.name}">
-                    <td>${acc.name}</td>
-                    <td class="quota-cell text-center">--</td>
-                    <td class="text-center">
-                        <div class="d-flex justify-content-center gap-1">
-                            <button class="btn btn-success btn-sm" data-action="select">选择</button>
-                            <button class="btn btn-info btn-sm" data-action="query-quota">查配额</button>
-                            <button class="btn btn-danger btn-sm" data-action="delete">删除</button>
+<div class="modal fade" id="createVmModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">创建 Azure 虚拟机</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="createVmForm">
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">选择区域</label>
+                            <select class="form-select" id="regionSelector">
+                                <option value="eastus">East US (美国东部)</option>
+                                <option value="japaneast">Japan East (日本东部)</option>
+                                <option value="southeastasia">Southeast Asia (新加坡)</option>
+                                <option value="koreacentral">Korea Central (韩国中部)</option>
+                                <option value="eastasia">East Asia (香港)</option>
+                            </select>
                         </div>
-                    </td>
-                </tr>`).join('') : '<tr><td colspan="3" class="text-center">没有已保存的账户</td></tr>';
-            renderPagination(data.total_pages, data.current_page);
-            updateAwsLoginStatus();
-        } catch (error) {
-            UI.accountList.innerHTML = '<tr><td colspan="3" class="text-center text-danger">加载账户列表失败</td></tr>';
-        }
-    };
-    const updateAwsLoginStatus = async () => {
-        try {
-            const data = await apiCall('/aws/api/session');
-            if (data && data.logged_in) {
-                UI.currentAccountStatus.innerHTML = `(当前: <span class="fw-bold text-success">${data.name}</span>)`;
-                setUIState(true);
-                loadRegions();
-            } else {
-                UI.currentAccountStatus.innerHTML = `(<span class="fw-bold text-danger">未选择</span>)`;
-                setUIState(false);
-                UI.regionSelector.innerHTML = '<option>请先选择AWS账户</option>';
-            }
-        } catch (error) { setUIState(false); }
-    };
-    const loadRegions = async () => {
-        log('正在加载区域列表...');
-        try {
-            const regions = await apiCall('/aws/api/regions');
-            if (!regions) return;
-            UI.regionSelector.innerHTML = regions.map(r => 
-                `<option 
-                    value="${r.code}" 
-                    data-enabled="${r.enabled}" 
-                    data-supports-lightsail="${r.supports_lightsail}">
-                    ${r.name} ${r.enabled ? '' : '(未激活)'}
-                </option>`
-            ).join('');
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">虚拟机规格</label>
+                            <select class="form-select" id="vmSize">
+                                <option value="Standard_B1s">B1s (1 vCPU, 1 GB RAM) - 免费级别</option>
+                                <option value="Standard_B1ms">B1ms (1 vCPU, 2 GB RAM)</option>
+                                <option value="Standard_B2s">B2s (2 vCPU, 4 GB RAM)</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label">操作系统</label>
+                            <select class="form-select" id="vmOs">
+                                <option value="Ubuntu-2204">Ubuntu 22.04 LTS</option>
+                                <option value="Ubuntu-2004">Ubuntu 20.04 LTS</option>
+                                <option value="Debian-11">Debian 11</option>
+                            </select>
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label">磁盘大小 (GB)</label>
+                            <input type="number" class="form-control" id="vmDiskSize" value="64">
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label">IP 类型</label>
+                            <select class="form-select" id="ipTypeSelector">
+                                <option value="Static">静态 IP (Static)</option>
+                                <option value="Dynamic">动态 IP (Dynamic)</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">自定义开机脚本 (User Data - Cloud-init)</label>
+                        <textarea class="form-control" id="userData" rows="3" placeholder="#!/bin/bash&#10;echo 'Hello' > /tmp/hello.txt"></textarea>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                <button type="button" id="confirmCreateVmBtn" class="btn btn-primary">确认创建</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
 
-            const defaultRegion = 'us-east-1';
-            const optionExists = Array.from(UI.regionSelector.options).some(opt => opt.value === defaultRegion);
-            if (optionExists) {
-                UI.regionSelector.value = defaultRegion;
-            }
-            log('区域列表加载成功。', 'success');
-            UI.regionSelector.dispatchEvent(new Event('change'));
-        } catch (error) { /* handled */ }
-    };
-    
-    const openInstanceTypeModal = async (type) => {
-        const region = UI.regionSelector.value;
-        const modal = (type === 'ec2') ? UI.ec2TypeModal : UI.lightsailTypeModal;
-        const selector = (type === 'ec2') ? UI.ec2TypeSelector : UI.lightsailTypeSelector;
-        const spinner = (type === 'ec2') ? UI.ec2Spinner : UI.lightsailSpinner;
-        const endpoint = (type === 'ec2') ? `/aws/api/ec2-instance-types?region=${region}` : `/aws/api/lightsail-bundles?region=${region}`;
-        if (type === 'ec2') { UI.ec2DiskSize.value = ''; }
-        modal.show();
-        spinner.style.display = 'block';
-        selector.innerHTML = '<option>正在加载...</option>';
-        try {
-            const data = await apiCall(endpoint);
-            if (!data) throw new Error("未能获取实例类型数据");
-            const format = (type === 'ec2')
-                ? data.map(t => `<option value="${t.value}">${t.text}${t.value.includes('micro') ? ' (免费套餐可用)' : ''}</option>`).join('')
-                : data.map(b => `<option value="${b.id}">${b.name}</option>`).join('');
-            selector.innerHTML = format;
-        } catch (error) { selector.innerHTML = `<option>加载失败: ${error.message}</option>`; }
-        finally { spinner.style.display = 'none'; }
-    };
-    const createInstance = async (type) => {
-        const finalUserData = UI.userData.value;
-        const payload = {
-            region: UI.regionSelector.value,
-            user_data: finalUserData,
-            ...(type === 'ec2' ? { instance_type: UI.ec2TypeSelector.value } : { bundle_id: UI.lightsailTypeSelector.value })
-        };
-        if (type === 'ec2') {
-            const diskSizeInput = UI.ec2DiskSize.value.trim();
-            if (diskSizeInput) {
-                const diskSize = parseInt(diskSizeInput, 10);
-                if (!isNaN(diskSize) && diskSize > 0) { payload.disk_size = diskSize; }
-            }
-        }
-        (type === 'ec2' ? UI.ec2TypeModal : UI.lightsailTypeModal).hide();
-        log(`请求在 ${payload.region} 创建 ${type.toUpperCase()} 实例...`);
-        if (payload.disk_size) { log(`自定义硬盘大小: ${payload.disk_size} GB`); }
-        log(`发送的 User Data 脚本:\n${finalUserData}`);
-        try {
-            const data = await apiCall(`/aws/api/instances/${type}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-            if (data && data.task_id) startLogPolling(data.task_id);
-        } catch (error) { /* apiCall函数已处理日志 */ }
-    };
-    const queryQuota = async (accountName, region) => {
-        const row = UI.accountList.querySelector(`tr[data-account-name="${accountName}"]`);
-        if (!row) return;
-        if (!region) { log('请先在下方“操作区域”中选择一个区域再查询配额。', 'error'); return; }
-        const quotaCell = row.querySelector('.quota-cell');
-        quotaCell.innerHTML = '<div class="spinner-border spinner-border-sm"></div>';
-        log(`正在为账户 ${accountName} 查询区域 ${region} 的 vCPU 配额...`);
-        try {
-            const data = await apiCall('/aws/api/query-quota', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ account_name: accountName, region: region }) });
-            if (data && data.quota !== undefined) {
-                quotaCell.textContent = data.quota;
-                quotaCell.classList.add('fw-bold');
-                log(`账户 ${accountName} 在区域 ${region} 的 vCPU 配额为: ${data.quota}`, 'success');
-            } else {
-                quotaCell.textContent = `错误`;
-                log(`账户 ${accountName} 的 vCPU 配额查询未能返回有效数据。`, 'error');
-            }
-        } catch (error) {
-            quotaCell.textContent = '查询失败';
-        }
-    };
-    UI.accountList.addEventListener('click', async (event) => {
-        const button = event.target.closest('button[data-action]');
-        if (!button) return;
-        const action = button.dataset.action;
-        const accountName = button.closest('tr').dataset.accountName;
-        if (action === 'select') {
-            log(`正在选择AWS账户 ${accountName}...`);
-            await apiCall('/aws/api/session', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: accountName }) });
-            log(`AWS账户 ${accountName} 选择成功。`, 'success');
-            updateAwsLoginStatus();
-        } else if (action === 'delete') {
-            if (!confirm(`确定要删除AWS账户 ${accountName} 吗？`)) return;
-            await apiCall(`/aws/api/accounts/${accountName}`, { method: 'DELETE' });
-            log(`AWS账户 ${accountName} 删除成功。`, 'success');
-            loadAndRenderAccounts(1);
-        } else if (action === 'query-quota') {
-            const region = UI.regionSelector.value;
-            queryQuota(accountName, region);
-        }
-    });
-    UI.saveAccountBtn.addEventListener('click', async () => {
-        const form = document.getElementById('addAccountForm');
-        const name = document.getElementById('accountName').value;
-        const access_key = document.getElementById('accessKey').value;
-        const secret_key = document.getElementById('secretKey').value;
-        if (!name || !access_key || !secret_key) return alert('所有字段均为必填项！');
-        try {
-            await apiCall('/aws/api/accounts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, access_key, secret_key }) });
-            log(`账户 ${name} 添加成功。`, 'success');
-            form.reset();
-            loadAndRenderAccounts(1);
-        } catch (error) { alert(`添加失败: ${error.message}`); }
-    });
-    UI.paginationNav.addEventListener('click', (event) => {
-        event.preventDefault();
-        const link = event.target.closest('a.page-link');
-        if (link) {
-            const page = parseInt(link.dataset.page, 10);
-            if (!isNaN(page)) {
-                loadAndRenderAccounts(page);
-            }
-        }
-    });
-    UI.queryAllQuotasBtn.addEventListener('click', () => {
-        const region = UI.regionSelector.value;
-        if (!region || UI.regionSelector.disabled) { log('请先选择一个账户和一个区域再执行此操作。', 'error'); return; }
-        log(`开始为所有账户查询区域 ${region} 的 vCPU 配额...`);
-        const rows = UI.accountList.querySelectorAll('tr[data-account-name]');
-        rows.forEach(row => {
-            const accountName = row.dataset.accountName;
-            queryQuota(accountName, region);
-        });
-    });
-
-    UI.regionSelector.addEventListener('change', () => {
-        const selectedOption = UI.regionSelector.options[UI.regionSelector.selectedIndex];
-        if (selectedOption) {
-            const isEnabled = (selectedOption.dataset.enabled === 'true');
-            const supportsLightsail = (selectedOption.dataset.supportsLightsail === 'true');
-
-            UI.activateRegionBtn.disabled = isEnabled;
-            UI.activateRegionBtn.className = isEnabled ? 'btn btn-sm btn-secondary' : 'btn btn-sm btn-warning';
-
-            UI.createEc2Btn.disabled = !isEnabled;
-            UI.createEc2Btn.title = isEnabled ? '创建 EC2 实例' : '请先激活此区域后再创建实例';
-
-            UI.createLsBtn.disabled = !isEnabled || !supportsLightsail;
-            UI.createLsBtn.title = !isEnabled ? '请先激活此区域' : (!supportsLightsail ? '此区域不支持Lightsail' : '创建 Lightsail 实例');
-        }
-    });
-
-    UI.activateRegionBtn.addEventListener('click', async () => {
-        const region = UI.regionSelector.value;
-        if (!region || UI.activateRegionBtn.disabled) return;
-        if (!confirm(`确定要激活区域 ${region} 吗？`)) return;
-        try {
-            const data = await apiCall('/aws/api/activate-region', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ region }) });
-            if(data && data.task_id) startLogPolling(data.task_id);
-        } catch(e) {}
-    });
-    UI.querySelectedRegionBtn.addEventListener('click', () => {
-        selectedInstance = null;
-        updateActionButtonsState();
-        const region = UI.regionSelector.value;
-        log(`正在查询区域 ${region} 的实例...`);
-        UI.instanceList.innerHTML = `<tr><td colspan="6" class="text-center">查询中... <div class="spinner-border spinner-border-sm"></div></td></tr>`;
-        apiCall(`/aws/api/instances?region=${region}`).then(instances => {
-            UI.instanceList.innerHTML = '';
-            if (instances && instances.length > 0) {
-                instances.forEach(renderInstanceRow);
-            } else {
-                UI.instanceList.innerHTML = `<tr><td colspan="6" class="text-center text-muted">该区域无实例</td></tr>`;
-            }
-            log(`区域 ${region} 查询完成。`, 'success');
-        }).catch(error => {
-            UI.instanceList.innerHTML = `<tr><td colspan="6" class="text-center text-danger">查询失败: ${error.message}</td></tr>`;
-        });
-    });
-    UI.queryAllRegionsBtn.addEventListener('click', () => {
-        selectedInstance = null;
-        updateActionButtonsState();
-        log("即将查询所有区域，过程可能较慢，请稍候...");
-        apiCall('/aws/api/query-all-instances', { method: 'POST' })
-            .then(data => {
-                if(data && data.task_id) startLogPolling(data.task_id);
-            });
-    });
-    
-    UI.startBtn.addEventListener('click', () => handleActionClick('start'));
-    UI.stopBtn.addEventListener('click', () => handleActionClick('stop'));
-    UI.restartBtn.addEventListener('click', () => handleActionClick('restart'));
-    UI.changeIpBtn.addEventListener('click', () => handleActionClick('change-ip'));
-    UI.deleteBtn.addEventListener('click', () => handleActionClick('delete'));
-    UI.createEc2Btn.addEventListener('click', () => openInstanceTypeModal('ec2'));
-    UI.createLsBtn.addEventListener('click', () => openInstanceTypeModal('lightsail'));
-    UI.confirmEc2CreationBtn.addEventListener('click', () => createInstance('ec2'));
-    UI.confirmLightsailCreationBtn.addEventListener('click', () => createInstance('lightsail'));
-    UI.clearLogBtn.addEventListener('click', () => { UI.logOutput.innerHTML = ''; });
-    
-    // --- 初始化 ---
-    loadAndRenderAccounts();
-});
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/azure_script.js', v='2026040503') }}"></script>
+{% endblock %}
