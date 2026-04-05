@@ -1,7 +1,6 @@
 document.addEventListener('DOMContentLoaded', function() {
-    // --- 1. DOM 元素获取 ---
+
     const profileList = document.getElementById('profileList');
-    if (profileList) profileList.dataset.fallbackConnectBound = '1';
 
     const currentProfileStatus = document.getElementById('currentProfileStatus');
     const profilesModalCurrentStatus = document.getElementById('profilesModalCurrentStatus');
@@ -26,6 +25,8 @@ document.addEventListener('DOMContentLoaded', function() {
 
     const sortAccountByDateHeader = document.getElementById('sortAccountByDate');
     const sortIcon = document.getElementById('sortIcon');
+    const sortAccountByAliasHeader = document.getElementById('sortAccountByAlias');
+    const sortAliasIcon = document.getElementById('sortAliasIcon');
 
     const addAccountModal = new bootstrap.Modal(document.getElementById('addAccountModal'));
     const profilesHubModalEl = document.getElementById('profilesHubModal');
@@ -88,17 +89,6 @@ document.addEventListener('DOMContentLoaded', function() {
         loadProfiles();
     });
 
-    window.setTimeout(() => {
-        if (typeof initializeOciDashboard === 'function') {
-            initializeOciDashboard();
-        }
-    }, 0);
-    window.addEventListener('load', () => {
-        if (profileList && profileList.children.length === 0) {
-            initializeOciDashboard();
-        }
-    });
-
     const addNewProfileBtnModal = document.getElementById('addNewProfileBtnModal');
     const newProfileAlias = document.getElementById('newProfileAlias');
     const newProfileConfigText = document.getElementById('newProfileConfigText');
@@ -115,7 +105,6 @@ document.addEventListener('DOMContentLoaded', function() {
     const clearSnatchLogBtn = document.getElementById('clearSnatchLogBtn');
     const snatchLogArea = document.getElementById('snatchLogArea');
 
-    // Modals
     const launchInstanceModal = new bootstrap.Modal(document.getElementById('createLaunchInstanceModal'));
     const launchInstanceModalEl = document.getElementById('createLaunchInstanceModal');
     const viewSnatchTasksModal = new bootstrap.Modal(document.getElementById('viewSnatchTasksModal'));
@@ -125,32 +114,36 @@ document.addEventListener('DOMContentLoaded', function() {
     const networkConfigHubModal = new bootstrap.Modal(document.getElementById('networkConfigHubModal'));
     const editInstanceModal = new bootstrap.Modal(document.getElementById('editInstanceModal'));
     const confirmActionModal = new bootstrap.Modal(document.getElementById('confirmActionModal'));
-    const editProfileModal = new bootstrap.Modal(document.getElementById('editProfileModal'));
-    const proxySettingsModal = new bootstrap.Modal(document.getElementById('proxySettingsModal'));
     const cloudflareSettingsModal = new bootstrap.Modal(document.getElementById('cloudflareSettingsModal'));
     const tgSettingsModal = new bootstrap.Modal(document.getElementById('tgSettingsModal'));
 
     const disconnectAccountBtn = document.getElementById('disconnectAccountBtn');
+
+    // ✅ 修复：补充 disconnectAccountBtn 事件绑定
+    if (disconnectAccountBtn) {
+        disconnectAccountBtn.addEventListener('click', async () => {
+            try {
+                await apiRequest('/oci/api/session', { method: 'DELETE' });
+                addLog('已成功断开连接', 'success');
+                await checkSession(false);
+            } catch (e) {
+                addLog('断开连接失败: ' + e.message, 'error');
+            }
+        });
+    }
 
     const instanceCountInput = document.getElementById('instanceCount');
     const launchInstanceShapeSelect = document.getElementById('instanceShape');
     const launchFlexConfig = document.getElementById('flexShapeConfig');
     const submitLaunchInstanceBtn = document.getElementById('submitLaunchInstanceBtn');
 
-    // Launch Modal Inputs
     const instancePasswordInput = document.getElementById('instancePassword');
     const enablePasswordLoginCheck = document.getElementById('enablePasswordLoginCheck');
     const passwordInputContainer = document.getElementById('passwordInputContainer');
 
-    // SSH Key Logic
     const sshKeySourceRadios = document.getElementsByName('sshKeySource');
     const customSshKeyContainer = document.getElementById('customSshKeyContainer');
     const launchCustomSshKey = document.getElementById('launchCustomSshKey');
-
-    const proxySettingsAlias = document.getElementById('proxySettingsAlias');
-    const proxyUrlInput = document.getElementById('proxyUrl');
-    const saveProxyBtn = document.getElementById('saveProxyBtn');
-    const removeProxyBtn = document.getElementById('removeProxyBtn');
 
     const stopSnatchTaskBtn = document.getElementById('stopSnatchTaskBtn');
     const resumeSnatchTaskBtn = document.getElementById('resumeSnatchTaskBtn');
@@ -172,7 +165,6 @@ document.addEventListener('DOMContentLoaded', function() {
     const saveNetworkRulesBtn = document.getElementById('saveNetworkRulesBtn');
     const openFirewallBtn = document.getElementById('openFirewallBtn');
 
-    // Edit Instance Elements
     const editDisplayName = document.getElementById('editDisplayName');
     const saveDisplayNameBtn = document.getElementById('saveDisplayNameBtn');
     const editFlexInstanceConfig = document.getElementById('editFlexInstanceConfig');
@@ -192,14 +184,12 @@ document.addEventListener('DOMContentLoaded', function() {
     const confirmDeleteVolumeCheck = document.getElementById('confirmDeleteVolumeCheck');
     const confirmActionModalConfirmBtn = document.getElementById('confirmActionModalConfirmBtn');
 
-    // TG Config Elements
     const tgBotTokenInput = document.getElementById('tgBotToken');
     const tgChatIdInput = document.getElementById('tgChatId');
     const saveTgConfigBtn = document.getElementById('saveTgConfigBtn');
     const getApiKeyBtn = document.getElementById('getApiKeyBtn');
     const apiKeyInput = document.getElementById('apiKeyInput');
 
-    // Cloudflare Config Elements
     const cloudflareApiTokenInput = document.getElementById('cloudflareApiToken');
     const cloudflareZoneIdInput = document.getElementById('cloudflareZoneId');
     const cloudflareDomainInput = document.getElementById('cloudflareDomain');
@@ -563,7 +553,7 @@ document.addEventListener('DOMContentLoaded', function() {
             currentInstances = instances;
             instanceList.innerHTML = '';
             if (instances.length === 0) {
-                 instanceList.innerHTML = `<tr><td colspan="6" class="text-center text-muted py-5">未找到任何实例</td></tr>`;
+                instanceList.innerHTML = `<tr><td colspan="6" class="text-center text-muted py-5">未找到任何实例</td></tr>`;
             } else {
                 instances.forEach(inst => {
                     const tr = document.createElement('tr');
@@ -591,25 +581,6 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     refreshInstancesBtn.addEventListener('click', refreshInstances);
-
-    // ✨ 修复：为“断开连接”按钮绑定事件 ✨
-    if (disconnectAccountBtn) {
-        disconnectAccountBtn.addEventListener('click', async () => {
-            if (!confirm('确定要断开当前 OCI 账号的连接吗？')) return;
-
-            addLog('正在断开连接...');
-            disconnectAccountBtn.disabled = true;
-            try {
-                const response = await apiRequest('/oci/api/session', { method: 'DELETE' });
-                addLog(response.message || '已成功断开连接。', 'success');
-                // 调用 checkSession(true) 强制重新校验并自动重置 UI 为未连接状态
-                await checkSession(true);
-            } catch (error) {
-                addLog('断开连接失败: ' + error.message, 'error');
-                disconnectAccountBtn.disabled = false;
-            }
-        });
-    }
 
     function updateStatCards({ profileCount = null, currentAlias = null, runningCount = null, completedCount = null, cloudflareConfigured = null, tgConfigured = null, defaultKeyConfigured = null } = {}) {
         if (profilesStatValue) {
@@ -672,20 +643,30 @@ document.addEventListener('DOMContentLoaded', function() {
             const profileData = await apiRequest(`/oci/api/profiles/${alias}`);
             connectedProfileAlias.textContent = alias;
             connectedProfileAlias.title = alias;
+
+            // 修改点：拦截 OCID，显示真实名称或 "-"
+            let userText = profileData.user_display_name || profileData.user || '-';
+            if (userText.startsWith('ocid1.')) userText = '-';
+
             if (connectedProfileUser) {
-                const userText = profileData.user_display_name || profileData.user || '未设置';
                 connectedProfileUser.textContent = userText;
                 connectedProfileUser.title = userText;
             }
+
             connectedProfileRegion.textContent = profileData.region || '未设置';
             connectedProfileRegion.title = profileData.region || '未设置';
             connectedProfileProxy.textContent = profileData.proxy || '未设置';
             connectedProfileProxy.title = profileData.proxy || '未设置';
+
+            // 修改点：拦截 OCID，显示真实名称或 "-"
+            let tenancyText = profileData.tenancy_display_name || profileData.tenancy_name || profileData.tenancy || '-';
+            if (tenancyText.startsWith('ocid1.')) tenancyText = '-';
+
             if (connectedProfileTenancy) {
-                const tenancyText = profileData.tenancy_display_name || profileData.tenancy_name || profileData.tenancy || '未设置';
                 connectedProfileTenancy.textContent = tenancyText;
                 connectedProfileTenancy.title = tenancyText;
             }
+
             connectedProfileRegDate.textContent = profileData.registration_date || '待同步';
             connectedProfileRegDate.title = profileData.registration_date || '待同步';
             connectedProfileSsh.innerHTML = profileData.default_ssh_public_key
@@ -702,6 +683,17 @@ document.addEventListener('DOMContentLoaded', function() {
                 connectedProfileMeta.textContent = `租户ID: ${profileData.tenancy || 'N/A'} | 区域: ${profileData.region || 'N/A'} | 用户: ${profileData.user || 'N/A'}`;
                 connectedProfileMeta.title = connectedProfileMeta.textContent;
             }
+
+            // 修改点：仅当名称有效时，更新写入本地数据库(LocalStorage)缓存
+            if (tenancyText !== '-') localStorage.setItem('oci_tenancy_' + alias, tenancyText);
+            if (userText !== '-') localStorage.setItem('oci_user_' + alias, userText);
+
+            // 修改点：同步更新表格中对应的行数据，无需刷新页面即可显示
+            const rowTenancy = document.getElementById('row-tenancy-' + alias);
+            const rowUser = document.getElementById('row-user-' + alias);
+            if (rowTenancy) { rowTenancy.textContent = tenancyText; rowTenancy.title = tenancyText; }
+            if (rowUser) { rowUser.textContent = userText; rowUser.title = userText; }
+
             connectedProfileEmptyState.classList.add('d-none');
             connectedProfileDetails.classList.remove('d-none');
         } catch (error) {
@@ -711,7 +703,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-    function resetConnectedProfileDetails(message = '请先在“OCI Profiles”弹出窗口中选择并连接一个账号') {
+    function resetConnectedProfileDetails(message = '请先在"OCI Profiles"弹出窗口中选择并连接一个账号') {
         if (!connectedProfileDetails || !connectedProfileEmptyState) return;
         connectedProfileEmptyState.innerHTML = `
             <div class="mb-2"><i class="bi bi-person-bounding-box fs-2"></i></div>
@@ -767,15 +759,15 @@ document.addEventListener('DOMContentLoaded', function() {
                 await refreshDashboardSummaries();
             }
         } catch (error) {
-             currentProfileStatus.textContent = '未连接 (会话检查失败)';
-             actionAreaProfile.classList.add('d-none');
-             if (profilesModalCurrentStatus) {
-                 profilesModalCurrentStatus.className = 'badge bg-danger-subtle text-danger border border-danger-subtle';
-                 profilesModalCurrentStatus.classList.add('d-none');
-             }
-             enableMainControls(false, false);
-             resetConnectedProfileDetails('当前账户状态检查失败');
-             await refreshDashboardSummaries();
+            currentProfileStatus.textContent = '未连接 (会话检查失败)';
+            actionAreaProfile.classList.add('d-none');
+            if (profilesModalCurrentStatus) {
+                profilesModalCurrentStatus.className = 'badge bg-danger-subtle text-danger border border-danger-subtle';
+                profilesModalCurrentStatus.classList.add('d-none');
+            }
+            enableMainControls(false, false);
+            resetConnectedProfileDetails('当前账户状态检查失败');
+            await refreshDashboardSummaries();
         }
     }
 
@@ -897,7 +889,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const taskNameForLog = parsedResult?.details?.display_name_prefix || parsedResult?.details?.name || taskId.substring(0,8);
 
         if (apiResponse.status === 'running' || apiResponse.status === 'paused') {
-             if (apiResponse.status === 'running' && !isRepoll && !snatchTaskAnnounced[taskId]) {
+            if (apiResponse.status === 'running' && !isRepoll && !snatchTaskAnnounced[taskId]) {
                 addLog(`任务 [${taskNameForLog}] 正在准备...`);
                 addLog(`抢占任务已成功启动，具体详情请点击【查看抢占任务】`, 'success');
                 snatchTaskAnnounced[taskId] = true;
@@ -920,48 +912,102 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     async function loadProfiles() {
-        profileList.innerHTML = `<tr><td colspan="4" class="text-center text-muted">正在加载...</td></tr>`;
+        profileList.innerHTML = `<tr><td colspan="6" class="text-center text-muted">正在加载...</td></tr>`;
         try {
             const profiles = await apiRequest(`/oci/api/profiles`);
             profileList.innerHTML = '';
 
             if (profiles.length === 0) {
-                profileList.innerHTML = `<tr><td colspan="4" class="text-center text-muted py-5"><div class="mb-2"><i class="bi bi-person-x fs-3"></i></div><div>未找到账号，请点击右上角添加</div></td></tr>`;
-            } else {
-                profiles.forEach(p => {
-                    const tr = document.createElement('tr');
-                    tr.dataset.alias = p.alias;
-                    tr.dataset.regDate = p.registration_date || '';
+                profileList.innerHTML = `<tr><td colspan="6" class="text-center text-muted py-5"><div class="mb-2"><i class="bi bi-person-x fs-3"></i></div><div>未找到账号，请点击右上角添加</div></td></tr>`;
+                return;
+            }
 
-                    let dateDisplay = '';
-                    if (p.registration_date && p.days_elapsed !== undefined) {
-                        dateDisplay = `<span class="text-success" style="font-weight:500;">${p.registration_date} (${p.days_elapsed}天)</span>`;
-                    } else {
-                        dateDisplay = `<span class="text-muted small">待同步 (连接后自动获取)</span>`;
-                    }
+            const savedOrderStr = localStorage.getItem('oci_profiles_order');
+            let savedOrder = [];
+            if (savedOrderStr) {
+                try { savedOrder = JSON.parse(savedOrderStr); } catch(e) {}
+            }
 
-                    tr.innerHTML = `
-                        <td class="drag-handle text-center align-middle"><i class="bi bi-grip-vertical"></i></td>
-                        <td class="align-middle">
-                            <a href="#" class="btn btn-info btn-sm connect-btn" data-alias="${p.alias}" onclick="event.preventDefault();" style="width: 15em; text-align: center;">${p.alias}</a>
-                        </td>
-                        <td class="text-center align-middle" style="white-space: nowrap;">
-                            ${dateDisplay}
-                        </td>
-                        <td class="text-end action-buttons align-middle">
-                            <button class="btn btn-warning btn-sm proxy-btn profile-action-btn" data-alias="${p.alias}"><i class="bi bi-shield-lock"></i> 代理</button>
-                            <button class="btn btn-info btn-sm edit-btn profile-action-btn" data-alias="${p.alias}"><i class="bi bi-pencil"></i> 编辑</button>
-                            <button class="btn btn-danger btn-sm delete-btn profile-action-btn" data-alias="${p.alias}"><i class="bi bi-trash"></i> 删除</button>
-                        </td>
-                    `;
-
-                    profileList.appendChild(tr);
+            if (savedOrder.length > 0) {
+                profiles.sort((a, b) => {
+                    const idxA = savedOrder.indexOf(a.alias);
+                    const idxB = savedOrder.indexOf(b.alias);
+                    if (idxA === -1 && idxB === -1) return 0;
+                    if (idxA === -1) return 1;
+                    if (idxB === -1) return -1;
+                    return idxA - idxB;
                 });
             }
+
+            profiles.forEach(p => {
+                const tr = document.createElement('tr');
+                tr.dataset.alias = p.alias;
+                tr.dataset.regDate = p.registration_date || '';
+
+                let dateDisplay = '';
+                if (p.registration_date && p.days_elapsed !== undefined) {
+                    dateDisplay = `<span class="text-success" style="font-weight:500;">${p.registration_date} (${p.days_elapsed}天)</span>`;
+                } else {
+                    dateDisplay = `<span class="text-muted small">待同步 (连接后自动获取)</span>`;
+                }
+
+                // 修改点：读取本地数据库，如果不存在或属于原始 OCID 长串，则强制降级为 "-"
+                let cachedTenancy = localStorage.getItem('oci_tenancy_' + p.alias);
+                if (!cachedTenancy || cachedTenancy.startsWith('ocid1.')) {
+                    cachedTenancy = '-';
+                }
+
+                let cachedUser = localStorage.getItem('oci_user_' + p.alias);
+                if (!cachedUser || cachedUser.startsWith('ocid1.')) {
+                    cachedUser = '-';
+                }
+
+                tr.innerHTML = `
+                    <td class="text-center align-middle">
+                        <input class="form-check-input profile-checkbox" type="checkbox" value="${p.alias}">
+                    </td>
+                    <td class="drag-handle text-center align-middle"><i class="bi bi-grip-vertical"></i></td>
+                    <td class="align-middle">
+                        <a href="#" class="btn btn-outline-info btn-sm manage-profile-btn" data-alias="${p.alias}" style="width: 100%; text-align: left; font-weight: bold; background: rgba(14, 165, 233, 0.1); border-color: rgba(14, 165, 233, 0.3); color: #bae6fd;">
+                            <i class="bi bi-gear-fill me-2 text-info"></i> ${p.alias}
+                        </a>
+                    </td>
+                    <td class="align-middle">
+                        <div class="text-truncate" style="max-width: 150px; font-size: 0.85rem;" title="${cachedTenancy}" id="row-tenancy-${p.alias}">${cachedTenancy}</div>
+                    </td>
+                    <td class="align-middle">
+                        <div class="text-truncate" style="max-width: 150px; font-size: 0.85rem;" title="${cachedUser}" id="row-user-${p.alias}">${cachedUser}</div>
+                    </td>
+                    <td class="text-center align-middle" style="white-space: nowrap;">
+                        ${dateDisplay}
+                    </td>
+                `;
+
+                profileList.appendChild(tr);
+            });
+
             updateStatCards({ profileCount: profiles.length });
+
+            if (document.getElementById('selectAllProfiles')) {
+                document.getElementById('selectAllProfiles').checked = false;
+            }
+            updateBatchDeleteBtnVisibility();
+
+            if (typeof Sortable !== 'undefined' && !profileList.dataset.sortableInitialized) {
+                Sortable.create(profileList, {
+                    handle: '.drag-handle',
+                    animation: 150,
+                    onEnd: function() {
+                        const order = Array.from(profileList.children).map(tr => tr.dataset.alias);
+                        localStorage.setItem('oci_profiles_order', JSON.stringify(order));
+                    }
+                });
+                profileList.dataset.sortableInitialized = 'true';
+            }
+
         } catch (error) {
             console.error(error);
-            profileList.innerHTML = `<tr><td colspan="4" class="text-center text-danger py-5"><div class="mb-2"><i class="bi bi-exclamation-triangle fs-3"></i></div><div>加载账号列表失败</div></td></tr>`;
+            profileList.innerHTML = `<tr><td colspan="6" class="text-center text-danger py-5"><div class="mb-2"><i class="bi bi-exclamation-triangle fs-3"></i></div><div>加载账号列表失败</div></td></tr>`;
         }
     }
 
@@ -1006,7 +1052,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
         return parts.join('') || '不到1分钟';
     }
-
 
     async function loadTgConfig() {
         try {
@@ -1214,6 +1259,10 @@ document.addEventListener('DOMContentLoaded', function() {
                     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 
                     dateCell.innerHTML = `<span class="text-success" style="font-weight:500;">${profileData.registration_date} (${diffDays}天)</span>`;
+
+                    const activeRow = dateCell.closest('tr');
+                    if (activeRow) activeRow.dataset.regDate = profileData.registration_date;
+
                     addLog(`账号 ${alias} 注册时间已自动同步完成！`, 'success');
                 }
             } catch (e) {
@@ -1223,137 +1272,194 @@ document.addEventListener('DOMContentLoaded', function() {
             if (attempts >= maxAttempts) {
                 clearInterval(intervalId);
                 if (dateCell.innerHTML.includes('spinner')) {
-                     dateCell.innerHTML = '<span class="text-muted small">同步超时 (请刷新重试)</span>';
+                    dateCell.innerHTML = '<span class="text-muted small">同步超时 (请刷新重试)</span>';
                 }
             }
         }, 2000);
     }
 
-    profileList.addEventListener('click', async (e) => {
-        const connectBtn = e.target.closest('.connect-btn');
-        const proxyBtn = e.target.closest('.proxy-btn');
-        const editBtn = e.target.closest('.edit-btn');
-        const deleteBtn = e.target.closest('.delete-btn');
+    const selectAllProfiles = document.getElementById('selectAllProfiles');
+    const batchDeleteProfilesBtn = document.getElementById('batchDeleteProfilesBtn');
 
-        if (connectBtn) {
-            const alias = connectBtn.dataset.alias;
-            const row = connectBtn.closest('tr');
-
-            if (row.classList.contains('profile-disabled')) {
-                addLog(`账号 ${alias} 已连接，无需重复操作。`, 'warning');
-                return;
-            }
-
-            addLog(`正在连接到 ${alias}...`);
-
-            const dateCell = row.querySelector('td:nth-child(3)');
-            let needsPolling = false;
-
-            if(dateCell) {
-                const currentText = dateCell.innerText.trim();
-                if(currentText === '' || currentText.includes('待同步')) {
-                    dateCell.innerHTML = '<div class="spinner-border spinner-border-sm text-secondary"></div> <span class="text-muted small">同步中...</span>';
-                    needsPolling = true;
-                }
-            }
-
-            document.querySelectorAll('#profileList tr').forEach(otherRow => {
-                otherRow.classList.add('profile-disabled');
-            });
-
-            try {
-                const response = await apiRequest('/oci/api/session', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ alias }) });
-                addLog(response.message, 'success');
-
-                const modalEl = document.getElementById('profilesHubModal');
-                if (modalEl) {
-                    const modalInstance = bootstrap.Modal.getInstance(modalEl) || bootstrap.Modal.getOrCreateInstance(modalEl);
-                    if (modalInstance) modalInstance.hide();
-                }
-
-                await checkSession(true);
-
-                if (needsPolling && dateCell) {
-                    pollForRegistrationDate(alias, dateCell);
-                }
-
-            } catch (error) {
-                loadProfiles();
+    function updateBatchDeleteBtnVisibility() {
+        const checked = document.querySelectorAll('.profile-checkbox:checked').length;
+        if (batchDeleteProfilesBtn) {
+            if (checked > 0) {
+                batchDeleteProfilesBtn.disabled = false;
+                batchDeleteProfilesBtn.innerHTML = `<i class="bi bi-trash-fill me-1"></i> 删除选中 (${checked})`;
+            } else {
+                batchDeleteProfilesBtn.disabled = true;
+                batchDeleteProfilesBtn.innerHTML = `<i class="bi bi-trash-fill me-1"></i> 删除选中`;
             }
         }
-        else if (proxyBtn) {
-            const alias = proxyBtn.dataset.alias;
-            try {
-                addLog(`加载 ${alias} 的代理设置...`);
-                const profileData = await apiRequest(`/oci/api/profiles/${alias}`);
-                proxySettingsAlias.value = alias;
-                proxyUrlInput.value = profileData.proxy || '';
-                proxySettingsModal.show();
-            } catch (error) {}
-        }
-        else if (editBtn) {
-            const alias = editBtn.dataset.alias;
-            try {
-                addLog(`正在加载账号 ${alias} 的信息...`);
-                const profileData = await apiRequest(`/oci/api/profiles/${alias}`);
-                document.getElementById('editProfileOriginalAlias').value = alias;
-                document.getElementById('editProfileAlias').value = alias;
-                const { default_ssh_public_key, key_content, proxy, ...configParts } = profileData;
-                document.getElementById('editProfileConfigText').value = Object.entries(configParts).map(([k, v]) => `${k || ''}=${v || ''}`).join('\n');
-                document.getElementById('editProfileSshKey').value = default_ssh_public_key || '';
-                document.getElementById('editProfileKeyFile').value = '';
-                editProfileModal.show();
-            } catch (error) {}
-        }
-        else if (deleteBtn) {
-            const alias = deleteBtn.dataset.alias;
-            confirmActionModalLabel.textContent = '确认删除账号';
-            confirmActionModalBody.textContent = `确定要删除账号 "${alias}" 吗？`;
-            confirmActionModalTerminateOptions.classList.add('d-none');
-            confirmActionModalConfirmBtn.onclick = async () => {
-                confirmActionModal.hide();
-                try {
-                    addLog(`正在删除账号: ${alias}...`);
-                    await apiRequest(`/oci/api/profiles/${alias}`, { method: 'DELETE' });
-                    addLog('删除成功!', 'success');
-                    loadProfiles();
-                    checkSession(false);
-                } catch (error) {}
-            };
-            confirmActionModal.show();
+    }
+
+    selectAllProfiles?.addEventListener('change', (e) => {
+        document.querySelectorAll('.profile-checkbox').forEach(cb => {
+            cb.checked = e.target.checked;
+        });
+        updateBatchDeleteBtnVisibility();
+    });
+
+    profileList.addEventListener('change', (e) => {
+        if (e.target.classList.contains('profile-checkbox')) {
+            updateBatchDeleteBtnVisibility();
+            const allCbs = document.querySelectorAll('.profile-checkbox');
+            const checkedCbs = document.querySelectorAll('.profile-checkbox:checked');
+            if(selectAllProfiles) {
+                selectAllProfiles.checked = (allCbs.length > 0 && allCbs.length === checkedCbs.length);
+            }
         }
     });
 
-    document.getElementById('saveProfileChangesBtn').addEventListener('click', async () => {
-        const originalAlias = document.getElementById('editProfileOriginalAlias').value;
-        const newAlias = document.getElementById('editProfileAlias').value.trim();
-        const configText = document.getElementById('editProfileConfigText').value.trim();
-        const sshKey = document.getElementById('editProfileSshKey').value.trim();
-        const keyFile = document.getElementById('editProfileKeyFile').files[0];
-        if (!newAlias || !configText || !sshKey) return addLog('账号名称、配置信息和SSH公钥不能为空', 'error');
+    batchDeleteProfilesBtn?.addEventListener('click', async () => {
+        const checked = Array.from(document.querySelectorAll('.profile-checkbox:checked')).map(cb => cb.value);
+        if (checked.length === 0) return;
+
+        if (!confirm(`警告：确定要彻底删除选中的 ${checked.length} 个账号吗？此操作不可恢复！`)) return;
+
+        const originalText = batchDeleteProfilesBtn.innerHTML;
+        batchDeleteProfilesBtn.disabled = true;
+        batchDeleteProfilesBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> 删除中...';
+
+        try {
+            addLog(`正在批量删除 ${checked.length} 个账号...`);
+            for (const alias of checked) {
+                await apiRequest(`/oci/api/profiles/${alias}`, { method: 'DELETE' });
+                localStorage.removeItem('oci_tenancy_' + alias);
+                localStorage.removeItem('oci_user_' + alias);
+            }
+            addLog('批量删除成功!', 'success');
+
+            const data = await apiRequest('/oci/api/session').catch(()=>({}));
+            if (data && data.logged_in && checked.includes(data.alias)) {
+                await apiRequest('/oci/api/session', { method: 'DELETE' }).catch(()=>{});
+            }
+
+            if (selectAllProfiles) selectAllProfiles.checked = false;
+            loadProfiles();
+            checkSession(false);
+        } catch (error) {
+            addLog('批量删除遇到错误: ' + error.message, 'error');
+        } finally {
+            batchDeleteProfilesBtn.disabled = false;
+            batchDeleteProfilesBtn.innerHTML = originalText;
+            updateBatchDeleteBtnVisibility();
+        }
+    });
+
+    profileList.addEventListener('click', async (e) => {
+        const manageBtn = e.target.closest('.manage-profile-btn');
+        if (manageBtn) {
+            e.preventDefault();
+            const alias = manageBtn.dataset.alias;
+            addLog(`正在读取账号 [${alias}] 的配置信息...`);
+
+            try {
+                const profileData = await apiRequest(`/oci/api/profiles/${alias}`);
+                document.getElementById('manageOriginalAlias').value = alias;
+                document.getElementById('manageProfileAlias').value = alias;
+
+                const { default_ssh_public_key, key_content, proxy, ...configParts } = profileData;
+                document.getElementById('manageProfileConfigText').value = Object.entries(configParts).map(([k, v]) => `${k || ''}=${v || ''}`).join('\n');
+                document.getElementById('manageProfileSshKey').value = default_ssh_public_key || '';
+                document.getElementById('manageProxyUrl').value = proxy || '';
+                document.getElementById('manageProfileKeyFile').value = '';
+
+                document.getElementById('profileManageModalTitle').textContent = `管理账号: ${alias}`;
+
+                const modalEl = document.getElementById('profileManageModal');
+                const modalInstance = bootstrap.Modal.getInstance(modalEl) || new bootstrap.Modal(modalEl);
+                modalInstance.show();
+            } catch (error) {
+                addLog('加载账号信息失败: ' + error.message, 'error');
+            }
+        }
+    });
+
+    document.getElementById('modalConnectBtn')?.addEventListener('click', async () => {
+        const alias = document.getElementById('manageOriginalAlias').value;
+        if (!alias) return;
+
+        addLog(`正在连接到 ${alias}...`);
+
+        const activeRow = document.querySelector(`#profileList tr[data-alias="${alias}"]`);
+        const dateCell = activeRow ? activeRow.querySelector('td:nth-child(6)') : null;
+        let needsPolling = false;
+
+        if(dateCell) {
+            const currentText = dateCell.innerText.trim();
+            if(currentText === '' || currentText.includes('待同步')) {
+                dateCell.innerHTML = '<div class="spinner-border spinner-border-sm text-secondary"></div> <span class="text-muted small">同步中...</span>';
+                needsPolling = true;
+            }
+        }
+
+        const manageModal = bootstrap.Modal.getInstance(document.getElementById('profileManageModal'));
+        if(manageModal) manageModal.hide();
+        const hubModal = bootstrap.Modal.getInstance(document.getElementById('profilesHubModal'));
+        if(hubModal) hubModal.hide();
+
+        document.querySelectorAll('#profileList tr').forEach(otherRow => {
+            otherRow.classList.add('profile-disabled');
+        });
+
+        try {
+            const response = await apiRequest('/oci/api/session', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ alias }) });
+            addLog(response.message, 'success');
+
+            await checkSession(true);
+
+            if (needsPolling && dateCell) {
+                pollForRegistrationDate(alias, dateCell);
+            }
+        } catch (error) {
+            loadProfiles();
+        }
+    });
+
+    document.getElementById('saveProfileManageBtn')?.addEventListener('click', async () => {
+        const originalAlias = document.getElementById('manageOriginalAlias').value;
+        const newAlias = document.getElementById('manageProfileAlias').value.trim();
+        const configText = document.getElementById('manageProfileConfigText').value.trim();
+        const sshKey = document.getElementById('manageProfileSshKey').value.trim();
+        const proxyUrl = document.getElementById('manageProxyUrl').value.trim();
+        const keyFile = document.getElementById('manageProfileKeyFile').files[0];
+
+        if (!newAlias || !configText) return addLog('账号名称和配置信息不能为空', 'error');
 
         addLog(`正在保存对账号 ${originalAlias} 的更改...`);
         try {
             const profileData = await apiRequest(`/oci/api/profiles/${originalAlias}`);
+
+            const existingKeys = Object.keys(profileData);
+            existingKeys.forEach(k => {
+                if (!['default_ssh_public_key', 'key_content', 'proxy', 'registration_date'].includes(k)) {
+                    delete profileData[k];
+                }
+            });
+
             configText.split('\n').forEach(line => {
                 const parts = line.split('=').map(p => p.trim());
-                if (parts.length === 2) profileData[parts[0]] = parts[1];
+                if (parts.length === 2 && parts[0]) profileData[parts[0]] = parts[1];
             });
+
             profileData['default_ssh_public_key'] = sshKey;
+            profileData['proxy'] = proxyUrl;
 
             const saveChanges = async () => {
-                const { user, fingerprint, tenancy, region, key_content, default_ssh_public_key, proxy, registration_date } = profileData;
-                const cleanProfileData = { user, fingerprint, tenancy, region, key_content, default_ssh_public_key, proxy, registration_date };
-
                 if (originalAlias !== newAlias) {
                     await apiRequest(`/oci/api/profiles/${originalAlias}`, { method: 'DELETE' });
                 }
                 await apiRequest('/oci/api/profiles', {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ alias: newAlias, profile_data: cleanProfileData })
+                    body: JSON.stringify({ alias: newAlias, profile_data: profileData })
                 });
                 addLog(`账号 ${newAlias} 保存成功!`, 'success');
-                editProfileModal.hide();
+
+                const manageModal = bootstrap.Modal.getInstance(document.getElementById('profileManageModal'));
+                if(manageModal) manageModal.hide();
+
                 loadProfiles();
                 checkSession(false);
             };
@@ -1365,31 +1471,10 @@ document.addEventListener('DOMContentLoaded', function() {
             } else {
                 saveChanges();
             }
-        } catch (error) {}
+        } catch (error) {
+            addLog('保存失败: ' + error.message, 'error');
+        }
     });
-
-    async function saveProxy(remove = false) {
-        const alias = proxySettingsAlias.value;
-        const proxyUrl = remove ? "" : proxyUrlInput.value.trim();
-
-        if (!alias) return;
-
-        addLog(`正在为账号 ${alias} ${remove ? '移除' : '保存'} 代理...`);
-        try {
-            const payload = { alias: alias, profile_data: { proxy: proxyUrl } };
-            await apiRequest('/oci/api/profiles', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            });
-            addLog(`账号 ${alias} 的代理设置已${remove ? '移除' : '更新'}！`, 'success');
-            proxySettingsModal.hide();
-            checkSession(false);
-        } catch (error) {}
-    }
-
-    saveProxyBtn.addEventListener('click', () => saveProxy(false));
-    removeProxyBtn.addEventListener('click', () => saveProxy(true));
 
     instanceList.addEventListener('click', (e) => {
         const row = e.target.closest('tr');
@@ -1769,16 +1854,47 @@ document.addEventListener('DOMContentLoaded', function() {
                 editInstanceIpv6List.innerHTML = '<tr><td colspan="3" class="text-center text-muted">未找到 IPv6 信息</td></tr>';
             }
 
+            // ✅ 修复：全选 IPv4/IPv6 逻辑
             const selectAllIpv4 = document.getElementById('selectAllIpv4');
             const selectAllIpv6 = document.getElementById('selectAllIpv6');
-            if(selectAllIpv4) selectAllIpv4.checked = false;
-            if(selectAllIpv6) selectAllIpv6.checked = false;
+            if (selectAllIpv4) {
+                selectAllIpv4.checked = false;
+                selectAllIpv4.onchange = (e) => {
+                    document.querySelectorAll('.ipv4-select').forEach(cb => cb.checked = e.target.checked);
+                };
+            }
+            if (selectAllIpv6) {
+                selectAllIpv6.checked = false;
+                selectAllIpv6.onchange = (e) => {
+                    document.querySelectorAll('.ipv6-select').forEach(cb => cb.checked = e.target.checked);
+                };
+            }
 
             editInstanceModal.show();
         } catch(error) {
             console.error(error);
             editInstanceIpList.innerHTML = '<tr><td colspan="5" class="text-center text-danger">加载失败</td></tr>';
             editInstanceIpv6List.innerHTML = '<tr><td colspan="3" class="text-center text-danger">加载失败</td></tr>';
+        }
+    });
+
+    // ✅ 修复：批量删除 IPv4 辅助 IP
+    document.getElementById('batchDeleteIpBtn')?.addEventListener('click', async () => {
+        const checked = Array.from(document.querySelectorAll('.ipv4-select:checked'));
+        if (checked.length === 0) return addLog('请先勾选要删除的辅助 IP', 'warning');
+        if (!confirm(`确定要批量删除选中的 ${checked.length} 个辅助 IP 吗？`)) return;
+        for (const cb of checked) {
+            await deleteSecondaryIp(cb.dataset.id, cb.dataset.addr).catch(() => {});
+        }
+    });
+
+    // ✅ 修复：批量删除 IPv6
+    document.getElementById('batchDeleteIpv6Btn')?.addEventListener('click', async () => {
+        const checked = Array.from(document.querySelectorAll('.ipv6-select:checked'));
+        if (checked.length === 0) return addLog('请先勾选要删除的 IPv6 地址', 'warning');
+        if (!confirm(`确定要批量删除选中的 ${checked.length} 个 IPv6 地址吗？`)) return;
+        for (const cb of checked) {
+            await deleteIpv6(cb.dataset.id, cb.dataset.addr).catch(() => {});
         }
     });
 
@@ -1792,6 +1908,7 @@ document.addEventListener('DOMContentLoaded', function() {
             setTimeout(refreshInstances, 3000);
         } catch(e) {}
     }
+
     saveDisplayNameBtn.addEventListener('click', () => handleInstanceUpdateRequest('修改名称', { action: 'update_display_name', instance_id: selectedInstance.id, display_name: editDisplayName.value }));
     saveFlexConfigBtn.addEventListener('click', () => handleInstanceUpdateRequest('修改CPU/内存', { action: 'update_shape', instance_id: selectedInstance.id, ocpus: parseInt(editOcpus.value, 10), memory_in_gbs: parseInt(editMemory.value, 10) }));
     saveBootVolumeSizeBtn.addEventListener('click', () => handleInstanceUpdateRequest('修改引导卷大小', { action: 'update_boot_volume', instance_id: selectedInstance.id, size_in_gbs: parseInt(editBootVolumeSize.value, 10) }));
@@ -1848,21 +1965,21 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 
     document.getElementById('networkSettingsHubBtn')?.addEventListener('click', () => {
-      networkConfigHubModal.hide();
-      setTimeout(() => networkSettingsModal.show(), 200);
+        networkConfigHubModal.hide();
+        setTimeout(() => networkSettingsModal.show(), 200);
     });
 
     document.getElementById('cloudflareSettingsBtn')?.addEventListener('click', async () => {
-      networkConfigHubModal.hide();
-      await loadCloudflareConfig();
-      setTimeout(() => cloudflareSettingsModal.show(), 200);
+        networkConfigHubModal.hide();
+        await loadCloudflareConfig();
+        setTimeout(() => cloudflareSettingsModal.show(), 200);
     });
 
     document.getElementById('tgSettingsBtn')?.addEventListener('click', async () => {
-      networkConfigHubModal.hide();
-      await loadTgConfig();
-      await loadXuiConfig();
-      setTimeout(() => tgSettingsModal.show(), 200);
+        networkConfigHubModal.hide();
+        await loadTgConfig();
+        await loadXuiConfig();
+        setTimeout(() => tgSettingsModal.show(), 200);
     });
 
     networkSettingsBtn.addEventListener('click', async () => {
@@ -1926,6 +2043,23 @@ document.addEventListener('DOMContentLoaded', function() {
             <td><button class="btn btn-sm btn-danger remove-rule-btn"><i class="bi bi-trash"></i></button></td>`;
         return tr;
     }
+
+    // ✅ 修复：补充 addIngressRuleBtn / addEgressRuleBtn 事件绑定
+    addIngressRuleBtn?.addEventListener('click', () => {
+        const placeholder = ingressRulesTable.querySelector('td[colspan="5"]');
+        if (placeholder) placeholder.parentElement.remove();
+        const newRow = createRuleRow('ingress');
+        ingressRulesTable.appendChild(newRow);
+        newRow.querySelector('.remove-rule-btn').onclick = () => newRow.remove();
+    });
+
+    addEgressRuleBtn?.addEventListener('click', () => {
+        const placeholder = egressRulesTable.querySelector('td[colspan="5"]');
+        if (placeholder) placeholder.parentElement.remove();
+        const newRow = createRuleRow('egress');
+        egressRulesTable.appendChild(newRow);
+        newRow.querySelector('.remove-rule-btn').onclick = () => newRow.remove();
+    });
 
     openFirewallBtn.addEventListener('click', () => {
         let ingressAdded = false;
@@ -2018,27 +2152,39 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
-    const sortAccountByAliasHeader = document.getElementById('sortAccountByAlias');
-    const sortAliasIcon = document.getElementById('sortAliasIcon');
     let aliasSortAsc = true;
-
     if (sortAccountByAliasHeader) {
         sortAccountByAliasHeader.addEventListener('click', () => {
             const rows = Array.from(profileList.querySelectorAll('tr[data-alias]'));
             rows.sort((a, b) => {
                 const aliasA = a.dataset.alias || '';
                 const aliasB = b.dataset.alias || '';
-                return aliasSortAsc
-                    ? aliasA.localeCompare(aliasB, 'zh-CN')
-                    : aliasB.localeCompare(aliasA, 'zh-CN');
+                return aliasSortAsc ? aliasA.localeCompare(aliasB, 'zh-CN') : aliasB.localeCompare(aliasA, 'zh-CN');
             });
             rows.forEach(row => profileList.appendChild(row));
             aliasSortAsc = !aliasSortAsc;
-            if (sortAliasIcon) {
-                sortAliasIcon.className = aliasSortAsc
-                    ? 'bi bi-sort-alpha-down text-primary'
-                    : 'bi bi-sort-alpha-down-alt text-primary';
-            }
+            if (sortAliasIcon) sortAliasIcon.className = aliasSortAsc ? 'bi bi-arrow-up text-primary' : 'bi bi-arrow-down text-primary';
+
+            const order = Array.from(profileList.children).map(tr => tr.dataset.alias);
+            localStorage.setItem('oci_profiles_order', JSON.stringify(order));
+        });
+    }
+
+    let dateSortAsc = true;
+    if (sortAccountByDateHeader) {
+        sortAccountByDateHeader.addEventListener('click', () => {
+            const rows = Array.from(profileList.querySelectorAll('tr[data-alias]'));
+            rows.sort((a, b) => {
+                const dateA = a.dataset.regDate ? new Date(a.dataset.regDate).getTime() : 0;
+                const dateB = b.dataset.regDate ? new Date(b.dataset.regDate).getTime() : 0;
+                return dateSortAsc ? dateA - dateB : dateB - dateA;
+            });
+            rows.forEach(row => profileList.appendChild(row));
+            dateSortAsc = !dateSortAsc;
+            if (sortIcon) sortIcon.className = dateSortAsc ? 'bi bi-arrow-up text-primary' : 'bi bi-arrow-down text-primary';
+
+            const order = Array.from(profileList.children).map(tr => tr.dataset.alias);
+            localStorage.setItem('oci_profiles_order', JSON.stringify(order));
         });
     }
 
@@ -2046,6 +2192,7 @@ document.addEventListener('DOMContentLoaded', function() {
     window.pollTaskStatus = pollTaskStatus;
     window.loadSnatchTasks = loadSnatchTasks;
 
+    // ✅ 修复：只保留一次初始化调用，彻底消除竞态条件
     async function initializeOciDashboard() {
         try {
             await loadProfiles();
@@ -2067,9 +2214,4 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     initializeOciDashboard();
-    window.setTimeout(() => {
-        if (profileList && profileList.children.length === 0) {
-            initializeOciDashboard();
-        }
-    }, 500);
 });
