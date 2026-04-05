@@ -119,7 +119,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
     const disconnectAccountBtn = document.getElementById('disconnectAccountBtn');
 
-    // ✅ 修复：补充 disconnectAccountBtn 事件绑定
     if (disconnectAccountBtn) {
         disconnectAccountBtn.addEventListener('click', async () => {
             try {
@@ -327,9 +326,15 @@ document.addEventListener('DOMContentLoaded', function() {
             };
         }
 
-        submitLaunchInstanceBtn.disabled = false;
-        launchInstanceShapeSelect.dispatchEvent(new Event('change'));
+        // 加载操作系统列表并动态获取实例规格
+        loadAndDisplayOS();
     });
+
+    // 监听操作系统选择变化，动态更新规格
+    const instanceOSSelect = document.getElementById('instanceOS');
+    if (instanceOSSelect) {
+        instanceOSSelect.addEventListener('change', updateAvailableShapes);
+    }
 
     submitLaunchInstanceBtn.addEventListener('click', () => {
         const proceedWithLaunch = async () => {
@@ -503,6 +508,107 @@ document.addEventListener('DOMContentLoaded', function() {
         loadSnatchTasks();
     });
 
+    // 动态加载操作系统
+    async function loadAndDisplayOS() {
+        const osSelect = document.getElementById('instanceOS');
+        const shapeSelect = document.getElementById('instanceShape');
+
+        if (!osSelect || !shapeSelect) return;
+
+        osSelect.innerHTML = '<option value="">正在加载系统列表...</option>';
+        osSelect.disabled = true;
+        shapeSelect.innerHTML = '<option value="">等待选择系统...</option>';
+        shapeSelect.disabled = true;
+        submitLaunchInstanceBtn.disabled = true;
+
+        try {
+            const versions = await apiRequest('/oci/api/available-os-versions');
+            osSelect.innerHTML = '';
+
+            if (versions.length === 0) {
+                osSelect.innerHTML = '<option value="">未找到任何支持的操作系统</option>';
+            } else {
+                versions.forEach(ver => {
+                    const parts = ver.split('-');
+                    const displayVer = parts.length > 1 ? `${parts[0]} ${parts[1]}` : ver;
+
+                    const option = document.createElement('option');
+                    option.value = ver;
+                    option.textContent = displayVer;
+                    osSelect.appendChild(option);
+                });
+
+                osSelect.disabled = false;
+                osSelect.selectedIndex = 0;
+                await updateAvailableShapes();
+            }
+        } catch (error) {
+            osSelect.innerHTML = '<option value="">加载失败</option>';
+            addLog('获取操作系统版本失败，请检查网络或账号权限。', 'error');
+        } finally {
+            osSelect.disabled = false;
+        }
+    }
+
+    // 动态刷新可用规格
+    async function updateAvailableShapes() {
+        const osSelect = document.getElementById('instanceOS');
+        const shapeSelect = document.getElementById('instanceShape');
+
+        if (!osSelect || !shapeSelect) return;
+        const os_name_version = osSelect.value;
+
+        if (!os_name_version) return;
+
+        shapeSelect.innerHTML = '<option value="">正在刷新实例规格...</option>';
+        shapeSelect.disabled = true;
+        submitLaunchInstanceBtn.disabled = true;
+
+        try {
+            const shapes = await apiRequest(`/oci/api/available-shapes?os_name_version=${os_name_version}`);
+            shapeSelect.innerHTML = '';
+            if (shapes.length === 0) {
+                shapeSelect.innerHTML = '<option value="">当前系统无可用规格</option>';
+            } else {
+                // 智能排序：把免费的 ARM (权重2) 和 AMD (权重1) 永远排在下拉框最前面
+                shapes.sort((a, b) => {
+                    const weightA = a.includes('A1.Flex') ? 2 : (a.includes('E2.1.Micro') ? 1 : 0);
+                    const weightB = b.includes('A1.Flex') ? 2 : (b.includes('E2.1.Micro') ? 1 : 0);
+                    if (weightA !== weightB) return weightB - weightA; // 按权重降序
+                    return a.localeCompare(b); // 权重一样就按字母排
+                });
+
+                // 去重逻辑
+                const seenShapes = new Set();
+                shapes.forEach(shape => {
+                    if (!seenShapes.has(shape)) {
+                        seenShapes.add(shape);
+                        const option = document.createElement('option');
+                        option.value = shape;
+                        
+                        // ✨ 增加醒目的免费标注 ✨
+                        if (shape === 'VM.Standard.A1.Flex') {
+                            option.textContent = '🌟 VM.Standard.A1.Flex (ARM 免费)';
+                        } else if (shape === 'VM.Standard.E2.1.Micro') {
+                            option.textContent = '🌟 VM.Standard.E2.1.Micro (AMD 免费)';
+                        } else {
+                            option.textContent = shape;
+                        }
+                        
+                        shapeSelect.appendChild(option);
+                    }
+                });
+
+                submitLaunchInstanceBtn.disabled = false;
+            }
+        } catch (error) {
+            shapeSelect.innerHTML = '<option value="">获取规格失败</option>';
+            addLog('自动刷新实例规格失败，请检查网络或账号权限。', 'error');
+        } finally {
+            shapeSelect.disabled = false;
+            shapeSelect.dispatchEvent(new Event('change'));
+        }
+    }
     function addLog(message, type = 'info') {
         const timestamp = new Date().toLocaleTimeString();
         const typeMap = { 'error': 'text-danger', 'success': 'text-success', 'warning': 'text-warning' };
@@ -644,7 +750,6 @@ document.addEventListener('DOMContentLoaded', function() {
             connectedProfileAlias.textContent = alias;
             connectedProfileAlias.title = alias;
 
-            // 修改点：拦截 OCID，显示真实名称或 "-"
             let userText = profileData.user_display_name || profileData.user || '-';
             if (userText.startsWith('ocid1.')) userText = '-';
 
@@ -658,7 +763,6 @@ document.addEventListener('DOMContentLoaded', function() {
             connectedProfileProxy.textContent = profileData.proxy || '未设置';
             connectedProfileProxy.title = profileData.proxy || '未设置';
 
-            // 修改点：拦截 OCID，显示真实名称或 "-"
             let tenancyText = profileData.tenancy_display_name || profileData.tenancy_name || profileData.tenancy || '-';
             if (tenancyText.startsWith('ocid1.')) tenancyText = '-';
 
@@ -684,11 +788,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 connectedProfileMeta.title = connectedProfileMeta.textContent;
             }
 
-            // 修改点：仅当名称有效时，更新写入本地数据库(LocalStorage)缓存
             if (tenancyText !== '-') localStorage.setItem('oci_tenancy_' + alias, tenancyText);
             if (userText !== '-') localStorage.setItem('oci_user_' + alias, userText);
 
-            // 修改点：同步更新表格中对应的行数据，无需刷新页面即可显示
             const rowTenancy = document.getElementById('row-tenancy-' + alias);
             const rowUser = document.getElementById('row-user-' + alias);
             if (rowTenancy) { rowTenancy.textContent = tenancyText; rowTenancy.title = tenancyText; }
@@ -951,7 +1053,6 @@ document.addEventListener('DOMContentLoaded', function() {
                     dateDisplay = `<span class="text-muted small">待同步 (连接后自动获取)</span>`;
                 }
 
-                // 修改点：读取本地数据库，如果不存在或属于原始 OCID 长串，则强制降级为 "-"
                 let cachedTenancy = localStorage.getItem('oci_tenancy_' + p.alias);
                 if (!cachedTenancy || cachedTenancy.startsWith('ocid1.')) {
                     cachedTenancy = '-';
@@ -1848,7 +1949,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 editInstanceIpv6List.innerHTML = '<tr><td colspan="3" class="text-center text-muted">未找到 IPv6 信息</td></tr>';
             }
 
-            // ✅ 修复：全选 IPv4/IPv6 逻辑
             const selectAllIpv4 = document.getElementById('selectAllIpv4');
             const selectAllIpv6 = document.getElementById('selectAllIpv6');
             if (selectAllIpv4) {
@@ -1872,7 +1972,6 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
-    // ✅ 修复：批量删除 IPv4 辅助 IP
     document.getElementById('batchDeleteIpBtn')?.addEventListener('click', async () => {
         const checked = Array.from(document.querySelectorAll('.ipv4-select:checked'));
         if (checked.length === 0) return addLog('请先勾选要删除的辅助 IP', 'warning');
@@ -1882,7 +1981,6 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
-    // ✅ 修复：批量删除 IPv6
     document.getElementById('batchDeleteIpv6Btn')?.addEventListener('click', async () => {
         const checked = Array.from(document.querySelectorAll('.ipv6-select:checked'));
         if (checked.length === 0) return addLog('请先勾选要删除的 IPv6 地址', 'warning');
@@ -2038,7 +2136,6 @@ document.addEventListener('DOMContentLoaded', function() {
         return tr;
     }
 
-    // ✅ 修复：补充 addIngressRuleBtn / addEgressRuleBtn 事件绑定
     addIngressRuleBtn?.addEventListener('click', () => {
         const placeholder = ingressRulesTable.querySelector('td[colspan="5"]');
         if (placeholder) placeholder.parentElement.remove();
@@ -2186,7 +2283,6 @@ document.addEventListener('DOMContentLoaded', function() {
     window.pollTaskStatus = pollTaskStatus;
     window.loadSnatchTasks = loadSnatchTasks;
 
-    // ✅ 修复：只保留一次初始化调用，彻底消除竞态条件
     async function initializeOciDashboard() {
         try {
             await loadProfiles();
