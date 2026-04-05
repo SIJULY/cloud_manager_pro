@@ -25,7 +25,7 @@
     }
     .oci-hero-title { font-size: clamp(2rem, 3vw, 3rem); font-weight: 800; color: #f8fafc; margin: 0.9rem 0 0.55rem; }
     .oci-hero-desc { color: #94a3b8; max-width: 62rem; line-height: 1.8; margin-bottom: 0; }
-
+    
     .oci-stat-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; }
     .oci-stat-card {
         min-height: 130px; padding: 1.1rem 1.25rem; border-radius: 20px; border: 1px solid rgba(148, 163, 184, 0.12);
@@ -35,7 +35,7 @@
     .oci-stat-card.primary { border-color: rgba(99, 102, 241, 0.24); }
     .oci-stat-card.info { border-color: rgba(56, 189, 248, 0.22); }
     .oci-stat-card.success { border-color: rgba(16, 185, 129, 0.22); }
-
+    
     .oci-stat-icon {
         width: 42px; height: 42px; border-radius: 14px; display: inline-flex; align-items: center; justify-content: center;
         margin-bottom: 0.9rem; color: #fff; font-size: 1.05rem;
@@ -44,17 +44,17 @@
     }
     .oci-stat-card.info .oci-stat-icon { background: linear-gradient(135deg, rgba(2, 132, 199, 0.92), rgba(56, 189, 248, 0.82)); box-shadow: 0 12px 24px rgba(56, 189, 248, 0.2); }
     .oci-stat-card.success .oci-stat-icon { background: linear-gradient(135deg, rgba(5, 150, 105, 0.92), rgba(16, 185, 129, 0.82)); box-shadow: 0 12px 24px rgba(16, 185, 129, 0.2); }
-
+    
     .oci-stat-label { color: #94a3b8; font-size: 0.78rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 0.35rem; }
     .oci-stat-value { color: #f8fafc; font-size: 1.15rem; font-weight: 800; }
     .oci-stat-sub { color: #64748b; font-size: 0.8rem; margin-top: 0.2rem; }
-
+    
     .oci-section-card { border-radius: 22px; overflow: hidden; }
     .oci-section-card .card-header { padding: 1rem 1.25rem; }
     .oci-card-title { display: flex; align-items: center; gap: 0.75rem; font-weight: 800; color: #f8fafc; }
     .oci-card-title i { width: 34px; height: 34px; border-radius: 12px; display: inline-flex; align-items: center; justify-content: center; background: rgba(99, 102, 241, 0.14); color: #818cf8; }
     .oci-panel-note { color: #64748b; font-size: 0.82rem; }
-
+    
     .connected-profile-card .card { background: rgba(15, 23, 42, 0.58); border: 1px solid rgba(148, 163, 184, 0.12); box-shadow: none; }
     .connected-profile-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.9rem; }
     .connected-profile-summary-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.9rem; }
@@ -62,19 +62,19 @@
     .connected-profile-item-label { font-size: 0.76rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 0.45rem; }
     .connected-profile-item-value { color: #e2e8f0; font-weight: 600; line-height: 1.35; word-break: break-word; font-size: 0.92rem; }
     .connected-profile-item-value.compact { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-
+    
     .oci-empty-state { border: 1px dashed rgba(148, 163, 184, 0.2); border-radius: 18px; background: rgba(15, 23, 42, 0.42); color: #94a3b8; }
     .oci-empty-state strong { color: #e2e8f0; }
-
+    
     .action-group { display: flex; flex-wrap: wrap; gap: 0.75rem; }
     .action-group .btn { flex: 1 1 0; min-width: 0; }
     .oci-log { background: linear-gradient(180deg, rgba(2, 6, 23, 0.98), rgba(15, 23, 42, 0.96)) !important; color: #86efac !important; border-color: rgba(16, 185, 129, 0.16) !important; font-family: ui-monospace, SFMono-Regular, monospace; }
-
+    
     .modal-content { background: linear-gradient(180deg, rgba(15, 23, 42, 0.98), rgba(15, 23, 42, 0.94)); border: 1px solid rgba(148, 163, 184, 0.16); box-shadow: 0 28px 80px rgba(2, 6, 23, 0.5); }
     .modal-header { border-bottom: 1px solid rgba(148, 163, 184, 0.12); background: rgba(2, 6, 23, 0.24); }
     .modal-footer { border-top: 1px solid rgba(148, 163, 184, 0.12); background: rgba(2, 6, 23, 0.16); }
     .oci-modal-lead { color: #94a3b8; font-size: 0.84rem; margin-top: 0.35rem; }
-
+    
     @media (max-width: 1199.98px) {
         .oci-stat-grid { grid-template-columns: 1fr 1fr; }
         .connected-profile-summary, .connected-profile-summary-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -91,7 +91,7 @@
     <div class="aws-shell">
         <section class="aws-hero">
             <div class="oci-badge"><i class="bi bi-cloud-aws"></i>AWS Control Plane</div>
-            <h1 class="oci-hero-title">AWS 实例管理器</h1>
+            <h1 class="oci-hero-title">AWS 账号管理平台</h1>
             <p class="oci-hero-desc">在此处管理您的 AWS 凭证、查询区域配额、激活所需区域，并一键创建 EC2 或 Lightsail 实例。</p>
         </section>
 
@@ -128,7 +128,7 @@
                     <button id="disconnectAccountBtn" class="btn btn-danger btn-sm profile-action-btn" disabled><i class="bi bi-power"></i> 断开连接</button>
                 </div>
             </div>
-
+            
             <div class="card-body">
                 <div id="connectedProfileEmptyState" class="oci-empty-state text-center py-5"><div class="mb-2"><i class="bi bi-person-bounding-box fs-2"></i></div><strong>尚未连接 AWS 账号</strong><div class="small mt-2">请先在“账户管理”弹出窗口中选择并连接一个账号。</div></div>
                 <div id="connectedProfileDetails" class="d-none">
