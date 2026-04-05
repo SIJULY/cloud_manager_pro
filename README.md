@@ -49,7 +49,7 @@
 
 DOCKER版本（推荐版本）
 ```bash
-bash <(curl -sL https://raw.githubusercontent.com/SIJULY/cloud_manager/main/docker-install.sh)
+bash <(curl -sL https://raw.githubusercontent.com/SIJULY/cloud_manager_pro/main/docker-install.sh)
 ```
 
 TGBOT控制面板（可选）
