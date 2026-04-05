@@ -1,52 +1,60 @@
 {% extends "layout.html" %}
 
-{% block title %}Azure 实例管理器 (Web版){% endblock %}
+{% block title %}AWS 实例管理器 (Web版){% endblock %}
 
 {% block head_extra %}
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
 <style>
-    .azure-shell { display: flex; flex-direction: column; gap: 1.5rem; }
-    .azure-hero {
+    .aws-shell { display: flex; flex-direction: column; gap: 1.5rem; }
+    .aws-hero {
         position: relative; overflow: hidden; padding: 2rem; border-radius: 24px;
-        border: 1px solid rgba(56, 189, 248, 0.22);
-        background: radial-gradient(circle at top right, rgba(59, 130, 246, 0.18), transparent 24%),
-                    radial-gradient(circle at left center, rgba(56, 189, 248, 0.16), transparent 26%),
+        border: 1px solid rgba(99, 102, 241, 0.22);
+        background: radial-gradient(circle at top right, rgba(56, 189, 248, 0.16), transparent 22%),
+                    radial-gradient(circle at left center, rgba(99, 102, 241, 0.22), transparent 26%),
                     linear-gradient(135deg, rgba(15, 23, 42, 0.96), rgba(30, 41, 59, 0.9));
         box-shadow: 0 20px 60px rgba(2, 6, 23, 0.34);
     }
-    .azure-hero::after {
+    .aws-hero::after {
         content: ''; position: absolute; inset: auto -40px -40px auto; width: 180px; height: 180px;
-        border-radius: 50%; background: radial-gradient(circle, rgba(56, 189, 248, 0.16), transparent 68%); pointer-events: none;
+        border-radius: 50%; background: radial-gradient(circle, rgba(99, 102, 241, 0.16), transparent 68%); pointer-events: none;
     }
     .oci-badge {
         display: inline-flex; align-items: center; gap: 0.45rem; padding: 0.45rem 0.85rem; border-radius: 999px;
-        border: 1px solid rgba(56, 189, 248, 0.28); background: rgba(56, 189, 248, 0.1); color: #7dd3fc;
+        border: 1px solid rgba(99, 102, 241, 0.28); background: rgba(99, 102, 241, 0.1); color: #818cf8;
         font-size: 0.76rem; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase;
     }
     .oci-hero-title { font-size: clamp(2rem, 3vw, 3rem); font-weight: 800; color: #f8fafc; margin: 0.9rem 0 0.55rem; }
     .oci-hero-desc { color: #94a3b8; max-width: 62rem; line-height: 1.8; margin-bottom: 0; }
+    
     .oci-stat-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; }
     .oci-stat-card {
         min-height: 130px; padding: 1.1rem 1.25rem; border-radius: 20px; border: 1px solid rgba(148, 163, 184, 0.12);
-        background: linear-gradient(180deg, rgba(15, 23, 42, 0.92), rgba(30, 41, 59, 0.84)); box-shadow: 0 14px 36px rgba(2, 6, 23, 0.26); cursor: pointer; transition: outline 0.2s ease;
+        background: linear-gradient(180deg, rgba(15, 23, 42, 0.92), rgba(30, 41, 59, 0.84)); box-shadow: 0 14px 36px rgba(2, 6, 23, 0.26);
+        cursor: pointer; transition: outline 0.2s ease;
     }
-    .oci-stat-card.primary { border-color: rgba(56, 189, 248, 0.24); }
-    .oci-stat-card.info { border-color: rgba(99, 102, 241, 0.22); }
+    .oci-stat-card.primary { border-color: rgba(99, 102, 241, 0.24); }
+    .oci-stat-card.info { border-color: rgba(56, 189, 248, 0.22); }
     .oci-stat-card.success { border-color: rgba(16, 185, 129, 0.22); }
+    
     .oci-stat-icon {
         width: 42px; height: 42px; border-radius: 14px; display: inline-flex; align-items: center; justify-content: center;
         margin-bottom: 0.9rem; color: #fff; font-size: 1.05rem;
-        background: linear-gradient(135deg, rgba(56, 189, 248, 0.92), rgba(2, 132, 199, 0.82)); box-shadow: 0 12px 24px rgba(56, 189, 248, 0.2);
+        background: linear-gradient(135deg, rgba(99, 102, 241, 0.92), rgba(79, 70, 229, 0.82));
+        box-shadow: 0 12px 24px rgba(99, 102, 241, 0.2);
     }
-    .oci-stat-card.info .oci-stat-icon { background: linear-gradient(135deg, rgba(99, 102, 241, 0.92), rgba(79, 70, 229, 0.82)); box-shadow: 0 12px 24px rgba(99, 102, 241, 0.2); }
+    .oci-stat-card.info .oci-stat-icon { background: linear-gradient(135deg, rgba(2, 132, 199, 0.92), rgba(56, 189, 248, 0.82)); box-shadow: 0 12px 24px rgba(56, 189, 248, 0.2); }
     .oci-stat-card.success .oci-stat-icon { background: linear-gradient(135deg, rgba(5, 150, 105, 0.92), rgba(16, 185, 129, 0.82)); box-shadow: 0 12px 24px rgba(16, 185, 129, 0.2); }
+    
     .oci-stat-label { color: #94a3b8; font-size: 0.78rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 0.35rem; }
     .oci-stat-value { color: #f8fafc; font-size: 1.15rem; font-weight: 800; }
     .oci-stat-sub { color: #64748b; font-size: 0.8rem; margin-top: 0.2rem; }
+    
     .oci-section-card { border-radius: 22px; overflow: hidden; }
     .oci-section-card .card-header { padding: 1rem 1.25rem; }
     .oci-card-title { display: flex; align-items: center; gap: 0.75rem; font-weight: 800; color: #f8fafc; }
-    .oci-card-title i { width: 34px; height: 34px; border-radius: 12px; display: inline-flex; align-items: center; justify-content: center; background: rgba(56, 189, 248, 0.14); color: #38bdf8; }
+    .oci-card-title i { width: 34px; height: 34px; border-radius: 12px; display: inline-flex; align-items: center; justify-content: center; background: rgba(99, 102, 241, 0.14); color: #818cf8; }
     .oci-panel-note { color: #64748b; font-size: 0.82rem; }
+    
     .connected-profile-card .card { background: rgba(15, 23, 42, 0.58); border: 1px solid rgba(148, 163, 184, 0.12); box-shadow: none; }
     .connected-profile-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.9rem; }
     .connected-profile-summary-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.9rem; }
@@ -54,75 +62,86 @@
     .connected-profile-item-label { font-size: 0.76rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 0.45rem; }
     .connected-profile-item-value { color: #e2e8f0; font-weight: 600; line-height: 1.35; word-break: break-word; font-size: 0.92rem; }
     .connected-profile-item-value.compact { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    
     .oci-empty-state { border: 1px dashed rgba(148, 163, 184, 0.2); border-radius: 18px; background: rgba(15, 23, 42, 0.42); color: #94a3b8; }
     .oci-empty-state strong { color: #e2e8f0; }
+    
     .action-group { display: flex; flex-wrap: wrap; gap: 0.75rem; }
     .action-group .btn { flex: 1 1 0; min-width: 0; }
     .oci-log { background: linear-gradient(180deg, rgba(2, 6, 23, 0.98), rgba(15, 23, 42, 0.96)) !important; color: #86efac !important; border-color: rgba(16, 185, 129, 0.16) !important; font-family: ui-monospace, SFMono-Regular, monospace; }
+    
     .modal-content { background: linear-gradient(180deg, rgba(15, 23, 42, 0.98), rgba(15, 23, 42, 0.94)); border: 1px solid rgba(148, 163, 184, 0.16); box-shadow: 0 28px 80px rgba(2, 6, 23, 0.5); }
     .modal-header { border-bottom: 1px solid rgba(148, 163, 184, 0.12); background: rgba(2, 6, 23, 0.24); }
     .modal-footer { border-top: 1px solid rgba(148, 163, 184, 0.12); background: rgba(2, 6, 23, 0.16); }
     .oci-modal-lead { color: #94a3b8; font-size: 0.84rem; margin-top: 0.35rem; }
-    @media (max-width: 1199.98px) { .oci-stat-grid { grid-template-columns: 1fr 1fr; } .connected-profile-summary, .connected-profile-summary-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-    @media (max-width: 767.98px) { .oci-stat-grid { grid-template-columns: 1fr; } .connected-profile-summary, .connected-profile-summary-3 { grid-template-columns: 1fr; } }
+    
+    @media (max-width: 1199.98px) {
+        .oci-stat-grid { grid-template-columns: 1fr 1fr; }
+        .connected-profile-summary, .connected-profile-summary-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @media (max-width: 767.98px) {
+        .oci-stat-grid { grid-template-columns: 1fr; }
+        .connected-profile-summary, .connected-profile-summary-3 { grid-template-columns: 1fr; }
+    }
 </style>
 {% endblock %}
 
 {% block content %}
 <div class="container py-2 py-lg-3">
-    <div class="azure-shell">
-        <section class="azure-hero">
-            <div class="oci-badge"><i class="bi bi-microsoft"></i>Azure Control Plane</div>
-            <h1 class="oci-hero-title">Azure 实例管理器</h1>
-            <p class="oci-hero-desc">管理您的 Azure Service Principal 凭证，快速创建虚拟机。采用全新一代深色科技面板设计，体验更加流畅、操作更加直观。</p>
+    <div class="aws-shell">
+        <section class="aws-hero">
+            <div class="oci-badge"><i class="bi bi-cloud-aws"></i>AWS Control Plane</div>
+            <h1 class="oci-hero-title">AWS 账号管理平台</h1>
+            <p class="oci-hero-desc">在此处管理您的 AWS 凭证、查询区域配额、激活所需区域，并一键创建 EC2 或 Lightsail 实例。</p>
         </section>
 
         <section class="oci-stat-grid">
             <button type="button" class="oci-stat-card primary text-start border-0 w-100" data-bs-toggle="modal" data-bs-target="#accountsModal">
                 <div class="oci-stat-icon"><i class="bi bi-person-workspace"></i></div>
-                <div class="oci-stat-label">服务主体管理</div>
-                <div class="oci-stat-value">Azure Profiles</div>
-                <div class="oci-stat-sub">添加并切换 Service Principal 账号</div>
+                <div class="oci-stat-label">账户管理</div>
+                <div class="oci-stat-value" id="profilesStatValue">AWS Profiles</div>
+                <div class="oci-stat-sub" id="profilesStatSub">添加凭证、连接、切换管理账户</div>
             </button>
-            <button type="button" class="oci-stat-card info text-start border-0 w-100" id="queryAllStatusBtn" disabled>
-                <div class="oci-stat-icon"><i class="bi bi-activity"></i></div>
-                <div class="oci-stat-label">订阅存活状态</div>
-                <div class="oci-stat-value">Sub Status</div>
-                <div class="oci-stat-sub">一键查询所有账单及存活状态</div>
+            <button type="button" class="oci-stat-card info text-start border-0 w-100" data-bs-toggle="modal" data-bs-target="#regionQuotaModal">
+                <div class="oci-stat-icon"><i class="bi bi-globe"></i></div>
+                <div class="oci-stat-label">区域与配额</div>
+                <div class="oci-stat-value">Regions & Quotas</div>
+                <div class="oci-stat-sub">选择默认区域及查询 vCPU 配额</div>
             </button>
-            <button type="button" class="oci-stat-card success text-start border-0 w-100" id="createVmModalBtn" data-bs-toggle="modal" data-bs-target="#createVmModal" disabled>
-                <div class="oci-stat-icon"><i class="bi bi-pc-display-horizontal"></i></div>
-                <div class="oci-stat-label">部署虚拟机</div>
-                <div class="oci-stat-value">Launch VM</div>
-                <div class="oci-stat-sub">在当前连接账户中快速部署</div>
-            </button>
+            <div class="oci-stat-card success text-start border-0 w-100">
+                <div class="oci-stat-icon"><i class="bi bi-geo-alt-fill"></i></div>
+                <div class="oci-stat-label">当前连接区域</div>
+                <div class="oci-stat-value" id="currentRegionStatValue">未连接</div>
+                <div class="oci-stat-sub" id="currentRegionStatSub">请先选择并连接 AWS 账户</div>
+            </div>
         </section>
 
         <section class="card oci-section-card connected-profile-card">
             <div class="card-header d-flex justify-content-between align-items-center gap-3 flex-wrap">
                 <div>
                     <div class="oci-card-title"><i class="bi bi-person-badge"></i><span>当前连接账户</span></div>
-                    <div class="oci-panel-note mt-2">此处仅展示当前已连接 Azure 服务主体的概览信息。<span id="currentAccountStatus" class="ms-2 text-muted">未连接</span></div>
+                    <div class="oci-panel-note mt-2">此处仅展示当前已连接 AWS 账户的概览信息。<span id="currentAccountStatus" class="ms-2 text-muted">未连接</span></div>
                 </div>
                 <div class="d-flex gap-2 flex-wrap align-items-center">
-                    <button id="createVmCardBtn" class="btn btn-success btn-sm profile-action-btn" disabled data-bs-toggle="modal" data-bs-target="#createVmModal"><i class="bi bi-plus-circle"></i> 创建虚拟机</button>
+                    <button id="createEc2Btn" class="btn btn-success btn-sm profile-action-btn" disabled data-bs-toggle="modal" data-bs-target="#ec2TypeModal"><i class="bi bi-cpu"></i> 创建 EC2</button>
+                    <button id="createLsBtn" class="btn btn-info btn-sm profile-action-btn text-white" disabled data-bs-toggle="modal" data-bs-target="#lightsailTypeModal"><i class="bi bi-box"></i> 创建 Lightsail</button>
                     <button id="disconnectAccountBtn" class="btn btn-danger btn-sm profile-action-btn" disabled><i class="bi bi-power"></i> 断开连接</button>
                 </div>
             </div>
-
+            
             <div class="card-body">
-                <div id="connectedProfileEmptyState" class="oci-empty-state text-center py-5"><div class="mb-2"><i class="bi bi-microsoft fs-2"></i></div><strong>尚未连接 Azure 账号</strong><div class="small mt-2">请先在“服务主体管理”弹出窗口中选择并连接一个账号。</div></div>
+                <div id="connectedProfileEmptyState" class="oci-empty-state text-center py-5"><div class="mb-2"><i class="bi bi-person-bounding-box fs-2"></i></div><strong>尚未连接 AWS 账号</strong><div class="small mt-2">请先在“账户管理”弹出窗口中选择并连接一个账号。</div></div>
                 <div id="connectedProfileDetails" class="d-none">
                     <div class="connected-profile-summary mb-3">
                         <div class="connected-profile-item"><div class="connected-profile-item-label">账户名称</div><div id="connectedProfileAlias" class="connected-profile-item-value compact">-</div></div>
-                        <div class="connected-profile-item"><div class="connected-profile-item-label">Client ID (App)</div><div id="connectedProfileAppId" class="connected-profile-item-value compact">-</div></div>
-                        <div class="connected-profile-item"><div class="connected-profile-item-label">Tenant ID</div><div id="connectedProfileTenantId" class="connected-profile-item-value compact">-</div></div>
-                        <div class="connected-profile-item"><div class="connected-profile-item-label">Subscription ID</div><div id="connectedProfileSubId" class="connected-profile-item-value compact">-</div></div>
+                        <div class="connected-profile-item"><div class="connected-profile-item-label">Access Key</div><div id="connectedProfileKey" class="connected-profile-item-value compact">-</div></div>
+                        <div class="connected-profile-item"><div class="connected-profile-item-label">默认区域</div><div id="connectedProfileRegion" class="connected-profile-item-value compact text-info">-</div></div>
+                        <div class="connected-profile-item"><div class="connected-profile-item-label">IAM 身份</div><div class="connected-profile-item-value compact">Root / IAM User</div></div>
                     </div>
                     <div class="connected-profile-summary-3">
-                        <div class="connected-profile-item"><div class="connected-profile-item-label">连接状态</div><div class="connected-profile-item-value"><span class="badge bg-success-subtle text-success border border-success-subtle">已连接</span></div></div>
-                        <div class="connected-profile-item"><div class="connected-profile-item-label">到期时间</div><div id="connectedProfileExpiration" class="connected-profile-item-value compact">-</div></div>
-                        <div class="connected-profile-item"><div class="connected-profile-item-label">备注</div><div class="connected-profile-item-value text-muted small">Azure Service Principal</div></div>
+                        <div class="connected-profile-item"><div class="connected-profile-item-label">连接状态</div><div id="connectedProfileStatusBadge" class="connected-profile-item-value compact"><span class="badge bg-success-subtle text-success border border-success-subtle">已连接</span></div></div>
+                        <div class="connected-profile-item"><div class="connected-profile-item-label">CloudWatch 监控</div><div class="connected-profile-item-value text-success">已启用</div></div>
+                        <div class="connected-profile-item"><div class="connected-profile-item-label">备注</div><div class="connected-profile-item-value text-muted small">AWS Boto3 API Client</div></div>
                     </div>
                 </div>
             </div>
@@ -131,11 +150,12 @@
         <section class="card oci-section-card">
             <div class="card-header d-flex justify-content-between align-items-center gap-3 flex-wrap">
                 <div>
-                    <div class="oci-card-title"><i class="bi bi-server"></i><span>虚拟机列表</span></div>
-                    <div class="oci-panel-note mt-2">管理当前订阅下的所有虚拟机，支持更换公网 IP。</div>
+                    <div class="oci-card-title"><i class="bi bi-server"></i><span>实例列表 (当前区域)</span></div>
+                    <div class="oci-panel-note mt-2">管理当前区域内的 EC2 与 Lightsail 实例。</div>
                 </div>
                 <div class="d-flex gap-2 flex-wrap">
-                    <button id="refreshVms" class="btn btn-sm btn-primary" disabled><i class="bi bi-arrow-clockwise"></i> 刷新列表</button>
+                    <button id="querySelectedRegionBtn" class="btn btn-sm btn-primary" disabled><i class="bi bi-arrow-clockwise"></i> 刷新当前区域</button>
+                    <button id="queryAllRegionsBtn" class="btn btn-sm btn-outline-info" disabled><i class="bi bi-search"></i> 查询所有区域</button>
                 </div>
             </div>
             <div class="card-body p-0">
@@ -143,14 +163,15 @@
                     <table class="table table-hover mb-0">
                         <thead>
                             <tr>
-                                <th style="width: 20%; padding-left: 1rem;">VM名称</th>
-                                <th class="text-center">资源组</th>
-                                <th class="text-center">状态</th>
-                                <th class="text-center">公网 IP</th>
-                                <th class="text-center">区域</th>
+                                <th style="width: 25%; padding-left: 1rem;">实例名称</th>
+                                <th class="text-center" style="width: 15%;">状态</th>
+                                <th class="text-center" style="width: 20%;">公网 IP</th>
+                                <th class="text-center" style="width: 10%;">类型</th>
+                                <th class="text-center" style="width: 15%;">所在区域</th>
+                                <th class="text-center" style="width: 15%;">运行时间</th>
                             </tr>
                         </thead>
-                        <tbody id="vmList"><tr><td colspan="5" class="text-center text-muted py-5">请先连接账户并点击刷新</td></tr></tbody>
+                        <tbody id="instanceList"><tr><td colspan="6" class="text-center text-muted py-5">请先连接账户并点击刷新</td></tr></tbody>
                     </table>
                 </div>
             </div>
@@ -159,8 +180,8 @@
                     <button type="button" id="startBtn" class="btn btn-success" disabled>启动</button>
                     <button type="button" id="stopBtn" class="btn btn-danger" disabled>关机</button>
                     <button type="button" id="restartBtn" class="btn btn-warning" disabled>重启</button>
-                    <button type="button" id="changeIpBtn" class="btn btn-info" disabled>更换静态IP</button>
-                    <button type="button" id="deleteBtn" class="btn btn-danger" disabled>删除VM</button>
+                    <button type="button" id="changeIpBtn" class="btn btn-info" disabled>更换IP</button>
+                    <button type="button" id="deleteBtn" class="btn btn-danger" disabled>删除/终止</button>
                 </div>
             </div>
         </section>
@@ -182,8 +203,8 @@
         <div class="modal-content">
             <div class="modal-header align-items-center">
                 <div class="flex-grow-1">
-                    <h5 class="modal-title">Azure 账户管理</h5>
-                    <div class="oci-modal-lead">在此连接、切换和删除您的 Azure Service Principal 凭证。</div>
+                    <h5 class="modal-title">AWS 账户管理</h5>
+                    <div class="oci-modal-lead">在此连接、切换和删除您的 AWS 账户凭证。</div>
                 </div>
                 <div class="d-flex align-items-center gap-3 pe-3">
                     <button class="btn btn-sm rounded-pill text-white px-3 py-2 fw-bold" style="background: linear-gradient(135deg, #0ea5e9, #3b82f6); border: none; box-shadow: 0 4px 12px rgba(59, 130, 246, 0.25);" data-bs-toggle="modal" data-bs-target="#addAccountModal">
@@ -195,10 +216,11 @@
             <div class="modal-body">
                 <div class="table-responsive">
                     <table class="table table-hover">
-                        <thead><tr><th>账户名称</th><th>Client ID</th><th>Tenant ID</th><th>Subscription ID</th><th>到期时间</th><th class="text-end">操作</th></tr></thead>
+                        <thead><tr><th>账户名称</th><th>Access Key</th><th>默认区域</th><th class="text-end">操作</th></tr></thead>
                         <tbody id="accountList"></tbody>
                     </table>
                 </div>
+                <div id="pagination-nav" class="mt-3 d-flex justify-content-center"></div>
             </div>
         </div>
     </div>
@@ -208,30 +230,22 @@
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title">添加 Azure 账户</h5>
+                <h5 class="modal-title">添加 AWS 账户</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body">
                 <form id="addAccountForm">
                     <div class="mb-3">
                         <label class="form-label">账户名称 (自定义)</label>
-                        <input type="text" class="form-control" name="account_name" placeholder="例如: azure-sub-1" required>
+                        <input type="text" class="form-control" name="name" placeholder="例如: aws-sg-1" required>
                     </div>
                     <div class="mb-3">
-                        <label class="form-label">Client ID (App ID)</label>
-                        <input type="text" class="form-control" name="client_id" placeholder="输入您的应用程序 ID" required>
+                        <label class="form-label">Access Key ID</label>
+                        <input type="text" class="form-control" name="access_key" placeholder="AKIA..." required>
                     </div>
                     <div class="mb-3">
-                        <label class="form-label">Client Secret</label>
-                        <input type="password" class="form-control" name="client_secret" placeholder="输入客户端密码值" required>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Tenant ID</label>
-                        <input type="text" class="form-control" name="tenant_id" placeholder="输入租户 ID" required>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Subscription ID</label>
-                        <input type="text" class="form-control" name="subscription_id" placeholder="输入订阅 ID" required>
+                        <label class="form-label">Secret Access Key</label>
+                        <input type="password" class="form-control" name="secret_key" placeholder="在此输入您的密钥" required>
                     </div>
                     <div class="text-end mt-4">
                         <button type="button" class="btn btn-secondary me-2" data-bs-dismiss="modal">取消</button>
@@ -243,71 +257,45 @@
     </div>
 </div>
 
-<div class="modal fade" id="createVmModal" tabindex="-1">
+<div class="modal fade" id="regionQuotaModal" tabindex="-1">
     <div class="modal-dialog modal-dialog-centered modal-lg">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title">创建 Azure 虚拟机</h5>
+                <div><h5 class="modal-title">全局区域与配额管理</h5><div class="oci-modal-lead">选择区域及查询全局 vCPU 配额，并一键激活未开通的区域。</div></div>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body">
-                <form id="createVmForm">
-                    <div class="row">
-                        <div class="col-md-6 mb-3">
-                            <label class="form-label">选择区域</label>
-                            <select class="form-select" id="regionSelector">
-                                <option value="eastus">East US (美国东部)</option>
-                                <option value="japaneast">Japan East (日本东部)</option>
-                                <option value="southeastasia">Southeast Asia (新加坡)</option>
-                                <option value="koreacentral">Korea Central (韩国中部)</option>
-                                <option value="eastasia">East Asia (香港)</option>
-                            </select>
-                        </div>
-                        <div class="col-md-6 mb-3">
-                            <label class="form-label">虚拟机规格</label>
-                            <select class="form-select" id="vmSize">
-                                <option value="Standard_B1s">B1s (1 vCPU, 1 GB RAM) - 免费级别</option>
-                                <option value="Standard_B1ms">B1ms (1 vCPU, 2 GB RAM)</option>
-                                <option value="Standard_B2s">B2s (2 vCPU, 4 GB RAM)</option>
-                            </select>
-                        </div>
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <h6 class="mb-0 fw-bold text-white">当前选中操作区域：</h6>
+                    <div class="d-flex gap-2">
+                        <select id="regionSelector" class="form-select form-select-sm" style="width: auto; min-width: 250px;">
+                            <option value="us-east-1" selected>us-east-1 (美国东部)</option>
+                            <option value="ap-northeast-1">ap-northeast-1 (东京)</option>
+                            <option value="ap-southeast-1">ap-southeast-1 (新加坡)</option>
+                        </select>
+                        <button id="setDefaultRegionBtn" class="btn btn-sm btn-primary" disabled>确定</button>
+                        <button id="activateRegionBtn" class="btn btn-sm btn-outline-warning" disabled>激活此区域</button>
                     </div>
-                    <div class="row">
-                        <div class="col-md-4 mb-3">
-                            <label class="form-label">操作系统</label>
-                            <select class="form-select" id="vmOs">
-                                <option value="Ubuntu-2204">Ubuntu 22.04 LTS</option>
-                                <option value="Ubuntu-2004">Ubuntu 20.04 LTS</option>
-                                <option value="Debian-11">Debian 11</option>
-                            </select>
-                        </div>
-                        <div class="col-md-4 mb-3">
-                            <label class="form-label">磁盘大小 (GB)</label>
-                            <input type="number" class="form-control" id="vmDiskSize" value="64">
-                        </div>
-                        <div class="col-md-4 mb-3">
-                            <label class="form-label">IP 类型</label>
-                            <select class="form-select" id="ipTypeSelector">
-                                <option value="Static">静态 IP (Static)</option>
-                                <option value="Dynamic">动态 IP (Dynamic)</option>
-                            </select>
-                        </div>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">自定义开机脚本 (User Data - Cloud-init)</label>
-                        <textarea class="form-control" id="userData" rows="3" placeholder="#!/bin/bash&#10;echo 'Hello' > /tmp/hello.txt"></textarea>
-                    </div>
-                </form>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
-                <button type="button" id="confirmCreateVmBtn" class="btn btn-primary">确认创建</button>
+                </div>
+                <hr>
+                <div class="text-center py-4">
+                    <button id="queryAllQuotasBtn" class="btn btn-info px-4 py-2" disabled><i class="bi bi-cpu"></i> 一键查询当前区域 vCPU 配额</button>
+                    <div class="form-text mt-2">查询结果将直接输出到主面板的“任务与日志输出”窗口中。</div>
+                </div>
             </div>
         </div>
     </div>
 </div>
+
+<div class="modal fade" id="ec2TypeModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered"><div class="modal-content"><div class="modal-header"><h5 class="modal-title">创建 EC2 实例</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><div class="mb-3"><label class="form-label">自定义开机脚本 (User Data)</label><textarea class="form-control" id="userData" rows="3" placeholder="#!/bin/bash&#10;echo 'Hello World' > /tmp/hello.txt"></textarea></div><div id="ec2Spinner" class="text-center mb-3" style="display: none;"><div class="spinner-border text-primary" role="status"></div></div><select id="ec2TypeSelector" class="form-select mb-3"></select><div><label for="ec2DiskSize" class="form-label">根卷大小 (GB)</label><input type="number" class="form-control" id="ec2DiskSize" placeholder="留空则使用默认"><div class="form-text">输入整数。</div></div></div><div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button><button type="button" id="confirmEc2CreationBtn" class="btn btn-primary">确认创建</button></div></div></div>
+</div>
+
+<div class="modal fade" id="lightsailTypeModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered"><div class="modal-content"><div class="modal-header"><h5 class="modal-title">创建 Lightsail 实例</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><div id="lightsailSpinner" class="text-center mb-3" style="display: none;"><div class="spinner-border text-primary" role="status"></div></div><select id="lightsailTypeSelector" class="form-select"></select></div><div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button><button type="button" id="confirmLightsailCreationBtn" class="btn btn-primary">确认创建</button></div></div></div>
+</div>
 {% endblock %}
 
 {% block scripts %}
-<script src="{{ url_for('static', filename='js/azure_script.js', v='2026040503') }}"></script>
+<script src="{{ url_for('static', filename='js/aws_script.js', v='2026040505') }}"></script>
 {% endblock %}
