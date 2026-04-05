@@ -1,301 +1,611 @@
-{% extends "layout.html" %}
+document.addEventListener('DOMContentLoaded', function() {
+    // UI元素引用
+    const UI = {
+        currentAccountStatus: document.getElementById('currentAccountStatus'),
+        saveAccountBtn: document.getElementById('saveAccountBtn'),
+        accountList: document.getElementById('accountList'),
+        queryAllQuotasBtn: document.getElementById('queryAllQuotasBtn'),
+        regionSelector: document.getElementById('regionSelector'),
+        activateRegionBtn: document.getElementById('activateRegionBtn'),
+        setDefaultRegionBtn: document.getElementById('setDefaultRegionBtn'),
+        querySelectedRegionBtn: document.getElementById('querySelectedRegionBtn'),
+        queryAllRegionsBtn: document.getElementById('queryAllRegionsBtn'),
+        createEc2Btn: document.getElementById('createEc2Btn'),
+        createLsBtn: document.getElementById('createLsBtn'),
+        userData: document.getElementById('userData'),
+        instanceList: document.getElementById('instanceList'),
+        logOutput: document.getElementById('logOutput'),
+        clearLogBtn: document.getElementById('clearLogBtn'),
+        ec2TypeModal: new bootstrap.Modal(document.getElementById('ec2TypeModal')),
+        lightsailTypeModal: new bootstrap.Modal(document.getElementById('lightsailTypeModal')),
+        ec2TypeSelector: document.getElementById('ec2TypeSelector'),
+        ec2DiskSize: document.getElementById('ec2DiskSize'),
+        lightsailTypeSelector: document.getElementById('lightsailTypeSelector'),
+        confirmEc2CreationBtn: document.getElementById('confirmEc2CreationBtn'),
+        confirmLightsailCreationBtn: document.getElementById('confirmLightsailCreationBtn'),
+        ec2Spinner: document.getElementById('ec2Spinner'),
+        lightsailSpinner: document.getElementById('lightsailSpinner'),
+        paginationNav: document.getElementById('pagination-nav'),
+        startBtn: document.getElementById('startBtn'),
+        stopBtn: document.getElementById('stopBtn'),
+        restartBtn: document.getElementById('restartBtn'),
+        changeIpBtn: document.getElementById('changeIpBtn'),
+        deleteBtn: document.getElementById('deleteBtn'),
+        
+        connectedProfileEmptyState: document.getElementById('connectedProfileEmptyState'),
+        connectedProfileDetails: document.getElementById('connectedProfileDetails'),
+        connectedProfileAlias: document.getElementById('connectedProfileAlias'),
+        connectedProfileKey: document.getElementById('connectedProfileKey'),
+        connectedProfileRegion: document.getElementById('connectedProfileRegion'),
+        disconnectAccountBtn: document.getElementById('disconnectAccountBtn'),
+        
+        // --- 新增：顶部区域卡片的元素引用 ---
+        currentRegionStatValue: document.getElementById('currentRegionStatValue'),
+        currentRegionStatSub: document.getElementById('currentRegionStatSub')
+    };
+    
+    let logPollingInterval = null;
+    let currentPage = 1;
+    let selectedInstance = null;
 
-{% block title %}AWS 实例管理器 (Web版){% endblock %}
+    // 辅助函数
+    const log = (message, type = 'info') => {
+        const now = new Date().toLocaleTimeString();
+        const colorClass = type === 'error' ? 'text-danger' : (type === 'success' ? 'text-success' : 'text-warning');
+        UI.logOutput.innerHTML += `<div class="${colorClass}">[${now}] ${message}</div>`;
+        UI.logOutput.scrollTop = UI.logOutput.scrollHeight;
+    };
 
-{% block head_extra %}
-<script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
-<style>
-    .aws-shell { display: flex; flex-direction: column; gap: 1.5rem; }
-    .aws-hero {
-        position: relative; overflow: hidden; padding: 2rem; border-radius: 24px;
-        border: 1px solid rgba(99, 102, 241, 0.22);
-        background: radial-gradient(circle at top right, rgba(56, 189, 248, 0.16), transparent 22%),
-                    radial-gradient(circle at left center, rgba(99, 102, 241, 0.22), transparent 26%),
-                    linear-gradient(135deg, rgba(15, 23, 42, 0.96), rgba(30, 41, 59, 0.9));
-        box-shadow: 0 20px 60px rgba(2, 6, 23, 0.34);
-    }
-    .aws-hero::after {
-        content: ''; position: absolute; inset: auto -40px -40px auto; width: 180px; height: 180px;
-        border-radius: 50%; background: radial-gradient(circle, rgba(99, 102, 241, 0.16), transparent 68%); pointer-events: none;
-    }
-    .oci-badge {
-        display: inline-flex; align-items: center; gap: 0.45rem; padding: 0.45rem 0.85rem; border-radius: 999px;
-        border: 1px solid rgba(99, 102, 241, 0.28); background: rgba(99, 102, 241, 0.1); color: #818cf8;
-        font-size: 0.76rem; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase;
-    }
-    .oci-hero-title { font-size: clamp(2rem, 3vw, 3rem); font-weight: 800; color: #f8fafc; margin: 0.9rem 0 0.55rem; }
-    .oci-hero-desc { color: #94a3b8; max-width: 62rem; line-height: 1.8; margin-bottom: 0; }
-    
-    .oci-stat-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; }
-    .oci-stat-card {
-        min-height: 130px; padding: 1.1rem 1.25rem; border-radius: 20px; border: 1px solid rgba(148, 163, 184, 0.12);
-        background: linear-gradient(180deg, rgba(15, 23, 42, 0.92), rgba(30, 41, 59, 0.84)); box-shadow: 0 14px 36px rgba(2, 6, 23, 0.26);
-        cursor: pointer; transition: outline 0.2s ease;
-    }
-    .oci-stat-card.primary { border-color: rgba(99, 102, 241, 0.24); }
-    .oci-stat-card.info { border-color: rgba(56, 189, 248, 0.22); }
-    .oci-stat-card.success { border-color: rgba(16, 185, 129, 0.22); }
-    
-    .oci-stat-icon {
-        width: 42px; height: 42px; border-radius: 14px; display: inline-flex; align-items: center; justify-content: center;
-        margin-bottom: 0.9rem; color: #fff; font-size: 1.05rem;
-        background: linear-gradient(135deg, rgba(99, 102, 241, 0.92), rgba(79, 70, 229, 0.82));
-        box-shadow: 0 12px 24px rgba(99, 102, 241, 0.2);
-    }
-    .oci-stat-card.info .oci-stat-icon { background: linear-gradient(135deg, rgba(2, 132, 199, 0.92), rgba(56, 189, 248, 0.82)); box-shadow: 0 12px 24px rgba(56, 189, 248, 0.2); }
-    .oci-stat-card.success .oci-stat-icon { background: linear-gradient(135deg, rgba(5, 150, 105, 0.92), rgba(16, 185, 129, 0.82)); box-shadow: 0 12px 24px rgba(16, 185, 129, 0.2); }
-    
-    .oci-stat-label { color: #94a3b8; font-size: 0.78rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 0.35rem; }
-    .oci-stat-value { color: #f8fafc; font-size: 1.15rem; font-weight: 800; }
-    .oci-stat-sub { color: #64748b; font-size: 0.8rem; margin-top: 0.2rem; }
-    
-    .oci-section-card { border-radius: 22px; overflow: hidden; }
-    .oci-section-card .card-header { padding: 1rem 1.25rem; }
-    .oci-card-title { display: flex; align-items: center; gap: 0.75rem; font-weight: 800; color: #f8fafc; }
-    .oci-card-title i { width: 34px; height: 34px; border-radius: 12px; display: inline-flex; align-items: center; justify-content: center; background: rgba(99, 102, 241, 0.14); color: #818cf8; }
-    .oci-panel-note { color: #64748b; font-size: 0.82rem; }
-    
-    .connected-profile-card .card { background: rgba(15, 23, 42, 0.58); border: 1px solid rgba(148, 163, 184, 0.12); box-shadow: none; }
-    .connected-profile-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.9rem; }
-    .connected-profile-summary-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.9rem; }
-    .connected-profile-item { min-height: 78px; padding: 0.75rem 0.9rem; border-radius: 16px; border: 1px solid rgba(148, 163, 184, 0.12); background: rgba(15, 23, 42, 0.52); }
-    .connected-profile-item-label { font-size: 0.76rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 0.45rem; }
-    .connected-profile-item-value { color: #e2e8f0; font-weight: 600; line-height: 1.35; word-break: break-word; font-size: 0.92rem; }
-    .connected-profile-item-value.compact { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    
-    .oci-empty-state { border: 1px dashed rgba(148, 163, 184, 0.2); border-radius: 18px; background: rgba(15, 23, 42, 0.42); color: #94a3b8; }
-    .oci-empty-state strong { color: #e2e8f0; }
-    
-    .action-group { display: flex; flex-wrap: wrap; gap: 0.75rem; }
-    .action-group .btn { flex: 1 1 0; min-width: 0; }
-    .oci-log { background: linear-gradient(180deg, rgba(2, 6, 23, 0.98), rgba(15, 23, 42, 0.96)) !important; color: #86efac !important; border-color: rgba(16, 185, 129, 0.16) !important; font-family: ui-monospace, SFMono-Regular, monospace; }
-    
-    .modal-content { background: linear-gradient(180deg, rgba(15, 23, 42, 0.98), rgba(15, 23, 42, 0.94)); border: 1px solid rgba(148, 163, 184, 0.16); box-shadow: 0 28px 80px rgba(2, 6, 23, 0.5); }
-    .modal-header { border-bottom: 1px solid rgba(148, 163, 184, 0.12); background: rgba(2, 6, 23, 0.24); }
-    .modal-footer { border-top: 1px solid rgba(148, 163, 184, 0.12); background: rgba(2, 6, 23, 0.16); }
-    .oci-modal-lead { color: #94a3b8; font-size: 0.84rem; margin-top: 0.35rem; }
-    
-    @media (max-width: 1199.98px) {
-        .oci-stat-grid { grid-template-columns: 1fr 1fr; }
-        .connected-profile-summary, .connected-profile-summary-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    }
-    @media (max-width: 767.98px) {
-        .oci-stat-grid { grid-template-columns: 1fr; }
-        .connected-profile-summary, .connected-profile-summary-3 { grid-template-columns: 1fr; }
-    }
-</style>
-{% endblock %}
+    const apiCall = async (url, options = {}) => {
+        try {
+            const response = await fetch(url, options);
+            if (response.status === 401) {
+                log('会话已过期，正在跳转到登录页...', 'error');
+                window.location.href = '/login';
+                throw new Error("Redirecting to login");
+            }
+            if (!response.ok) {
+                let errorMsg = `HTTP 错误! 状态: ${response.status}`;
+                try { const errData = await response.json(); errorMsg = errData.error || JSON.stringify(errData); }
+                catch (e) { errorMsg = await response.text(); }
+                throw new Error(errorMsg);
+            }
+            const data = await response.json();
+            if (data.error) {
+                log(data.error, 'error');
+            }
+            return data;
+        } catch (error) { log(error.message, 'error'); throw error; }
+    };
 
-{% block content %}
-<div class="container py-2 py-lg-3">
-    <div class="aws-shell">
-        <section class="aws-hero">
-            <div class="oci-badge"><i class="bi bi-cloud-aws"></i>AWS Control Plane</div>
-            <h1 class="oci-hero-title">AWS 账号管理平台</h1>
-            <p class="oci-hero-desc">在此处管理您的 AWS 凭证、查询区域配额、激活所需区域，并一键创建 EC2 或 Lightsail 实例。</p>
-        </section>
+    const formatDuration = (isoString) => {
+        if (!isoString) return 'N/A';
+        const launchTime = new Date(isoString);
+        const now = new Date();
+        let seconds = Math.floor((now - launchTime) / 1000);
+        if (seconds < 0) return '未来时间';
+        if (seconds < 60) return `${seconds} 秒`;
+        let days = Math.floor(seconds / (24 * 3600));
+        seconds %= (24 * 3600);
+        let hours = Math.floor(seconds / 3600);
+        seconds %= 3600;
+        let minutes = Math.floor(seconds / 60);
+        let result = '';
+        if (days > 0) result += `${days}天 `;
+        if (hours > 0) result += `${hours}小时 `;
+        if (minutes > 0) result += `${minutes}分钟`;
+        return result.trim() || '刚刚启动';
+    };
 
-        <section class="oci-stat-grid">
-            <button type="button" class="oci-stat-card primary text-start border-0 w-100" data-bs-toggle="modal" data-bs-target="#accountsModal">
-                <div class="oci-stat-icon"><i class="bi bi-person-workspace"></i></div>
-                <div class="oci-stat-label">账户管理</div>
-                <div class="oci-stat-value" id="profilesStatValue">AWS Profiles</div>
-                <div class="oci-stat-sub" id="profilesStatSub">添加凭证、连接、切换管理账户</div>
-            </button>
-            <button type="button" class="oci-stat-card info text-start border-0 w-100" data-bs-toggle="modal" data-bs-target="#regionQuotaModal">
-                <div class="oci-stat-icon"><i class="bi bi-globe"></i></div>
-                <div class="oci-stat-label">区域与配额</div>
-                <div class="oci-stat-value">Regions & Quotas</div>
-                <div class="oci-stat-sub">选择默认区域及查询 vCPU 配额</div>
-            </button>
-            <div class="oci-stat-card success text-start border-0 w-100">
-                <div class="oci-stat-icon"><i class="bi bi-geo-alt-fill"></i></div>
-                <div class="oci-stat-label">当前连接区域</div>
-                <div class="oci-stat-value" id="currentRegionStatValue">未连接</div>
-                <div class="oci-stat-sub" id="currentRegionStatSub">请先选择并连接 AWS 账户</div>
-            </div>
-        </section>
+    const renderInstanceRow = (inst) => {
+        const row = document.createElement('tr');
+        row.dataset.id = inst.id;
+        row.dataset.name = inst.name || inst.id;
+        row.dataset.region = inst.region;
+        row.dataset.type = inst.type;
+        row.dataset.state = inst.state;
+        
+        const uptime = (inst.state === 'running' || inst.state === 'pending') ? formatDuration(inst.launch_time) : '已停止';
+        const isRunning = inst.state === 'running';
 
-        <section class="card oci-section-card connected-profile-card">
-            <div class="card-header d-flex justify-content-between align-items-center gap-3 flex-wrap">
-                <div>
-                    <div class="oci-card-title"><i class="bi bi-person-badge"></i><span>当前连接账户</span></div>
-                    <div class="oci-panel-note mt-2">此处仅展示当前已连接 AWS 账户的概览信息。<span id="currentAccountStatus" class="ms-2 text-muted">未连接</span></div>
-                </div>
-                <div class="d-flex gap-2 flex-wrap align-items-center">
-                    <button id="createEc2Btn" class="btn btn-success btn-sm profile-action-btn" disabled data-bs-toggle="modal" data-bs-target="#ec2TypeModal"><i class="bi bi-cpu"></i> 创建 EC2</button>
-                    <button id="createLsBtn" class="btn btn-info btn-sm profile-action-btn text-white" disabled data-bs-toggle="modal" data-bs-target="#lightsailTypeModal"><i class="bi bi-box"></i> 创建 Lightsail</button>
-                    <button id="disconnectAccountBtn" class="btn btn-danger btn-sm profile-action-btn" disabled><i class="bi bi-power"></i> 断开连接</button>
-                </div>
-            </div>
+        row.innerHTML = `
+            <td><span class="badge bg-${inst.type === 'EC2' ? 'success' : 'info'}">${inst.type}</span></td>
+            <td class="text-center">${inst.region}</td>
+            <td class="text-center">${inst.name || inst.id}</td>
+            <td class="text-center"><span class="badge bg-${isRunning ? 'success' : (inst.state === 'stopped' ? 'secondary' : 'warning')}">${inst.state}</span></td>
+            <td class="text-center">${inst.ip}</td>
+            <td class="text-center">${uptime}</td>
+        `;
+        row.style.cursor = 'pointer';
+        row.addEventListener('click', () => {
+            if (selectedInstance) {
+                selectedInstance.classList.remove('table-active');
+            }
+            row.classList.add('table-active');
+            selectedInstance = row;
+            updateActionButtonsState();
+        });
+        UI.instanceList.appendChild(row);
+    };
+
+    const updateActionButtonsState = () => {
+        const setButtonState = (button, activeClass, isEnabled) => {
+            button.disabled = !isEnabled;
+            button.classList.remove('btn-success', 'btn-warning', 'btn-secondary', 'btn-info', 'btn-danger');
+            if (isEnabled) {
+                button.classList.add(activeClass);
+            } else {
+                button.classList.add('btn-secondary');
+            }
+        };
+
+        if (!selectedInstance) {
+            setButtonState(UI.startBtn, 'btn-success', false);
+            setButtonState(UI.stopBtn, 'btn-warning', false);
+            setButtonState(UI.restartBtn, 'btn-success', false);
+            setButtonState(UI.changeIpBtn, 'btn-info', false);
+            setButtonState(UI.deleteBtn, 'btn-danger', false);
+            return;
+        }
+
+        const state = selectedInstance.dataset.state;
+        const type = selectedInstance.dataset.type;
+        const isRunning = state === 'running';
+        const isStopped = state === 'stopped';
+
+        setButtonState(UI.startBtn, 'btn-success', isStopped);
+        setButtonState(UI.stopBtn, 'btn-warning', isRunning);
+        setButtonState(UI.restartBtn, 'btn-success', isRunning);
+        setButtonState(UI.deleteBtn, 'btn-danger', !(isRunning && type === 'EC2'));
+        setButtonState(UI.changeIpBtn, 'btn-info', isRunning && type === 'EC2');
+    };
+
+    const handleActionClick = async (action) => {
+        if (!selectedInstance) {
+            log('错误：请先在列表中选择一个实例。', 'error');
+            return;
+        }
+        const instance = {
+            id: selectedInstance.dataset.id,
+            name: selectedInstance.dataset.name,
+            region: selectedInstance.dataset.region,
+            type: selectedInstance.dataset.type,
+        };
+        const confirmText = {
+            start: `确定要启动实例 ${instance.name}?`,
+            stop: `确定要停止实例 ${instance.name}?`,
+            restart: `确定要重启实例 ${instance.name}?`,
+            delete: `【警告】此操作不可恢复！确定要永久删除实例 ${instance.name} 吗?`,
+            'change-ip': `确定要为实例 ${instance.name} 分配一个新的IP地址吗？这会产生少量费用，并自动释放旧IP。`
+        };
+        if (!confirm(confirmText[action])) return;
+        log(`正在对实例 ${instance.name} 执行 ${action} 操作...`);
+        try {
+            const payload = {
+                action: action,
+                instance_id: instance.id,
+                region: instance.region,
+                instance_type: instance.type
+            };
+            const response = await apiCall('/aws/api/instance-action', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            if (response && response.message) {
+                log(response.message, 'success');
+            }
+            setTimeout(() => UI.querySelectedRegionBtn.dispatchEvent(new Event('click')), 5000);
+        } catch (error) {
+            setTimeout(() => UI.querySelectedRegionBtn.dispatchEvent(new Event('click')), 500);
+        }
+    };
+    
+    const startLogPolling = (taskId) => {
+        if (logPollingInterval) {
+            clearInterval(logPollingInterval);
+            logPollingInterval = null;
+        }
+        UI.instanceList.innerHTML = `<tr><td colspan="6" class="text-center" data-loading-row="true">查询中... <div class="spinner-border spinner-border-sm"></div></td></tr>`;
+        
+        logPollingInterval = setInterval(async () => {
+            try {
+                const data = await apiCall(`/aws/api/task/${taskId}/logs`);
+                if (data && data.logs) {
+                    const loadingRow = UI.instanceList.querySelector('td[data-loading-row="true"]');
+                    if (loadingRow) {
+                        loadingRow.parentNode.remove();
+                    }
+
+                    data.logs.forEach(logLine => {
+                        if (logLine.startsWith("FOUND_INSTANCE::")) {
+                            try {
+                                const instanceData = JSON.parse(logLine.substring("FOUND_INSTANCE::".length));
+                                if (!document.querySelector(`[data-id="${instanceData.id}"]`)) {
+                                    renderInstanceRow(instanceData);
+                                }
+                            } catch (e) {
+                                log("无法解析实例数据: " + logLine, 'error');
+                            }
+                        } else {
+                            log(logLine);
+                        }
+                    });
+
+                    if (data.logs.includes("--- 任务完成 ---")) {
+                        clearInterval(logPollingInterval);
+                        logPollingInterval = null;
+                        log("所有区域查询任务已完成。", 'success');
+                        
+                        if (UI.instanceList.rows.length === 0) {
+                            UI.instanceList.innerHTML = `<tr><td colspan="6" class="text-center text-muted">未找到实例</td></tr>`;
+                        }
+                    }
+                }
+            } catch (error) {
+                clearInterval(logPollingInterval);
+                logPollingInterval = null;
+                log("日志轮询失败或任务已结束。", 'error');
+            }
+        }, 1000);
+    };
+    
+    const setUIState = (isAwsLoggedIn) => {
+        [UI.createEc2Btn, UI.createLsBtn, UI.querySelectedRegionBtn, UI.queryAllRegionsBtn, UI.regionSelector, UI.disconnectAccountBtn, UI.setDefaultRegionBtn, UI.queryAllQuotasBtn].forEach(el => {
+            if(el) el.disabled = !isAwsLoggedIn;
+        });
+        if (UI.activateRegionBtn) UI.activateRegionBtn.disabled = true;
+    };
+    
+    const renderPagination = (totalPages, currentPage) => {
+        if (!UI.paginationNav) return;
+        UI.paginationNav.innerHTML = '';
+        if (totalPages <= 1) return;
+        let paginationHTML = '<ul class="pagination pagination-sm">';
+        paginationHTML += `<li class="page-item ${currentPage === 1 ? 'disabled' : ''}">
+            <a class="page-link" href="#" data-page="${currentPage - 1}">‹</a></li>`;
+        for (let i = 1; i <= totalPages; i++) {
+            paginationHTML += `<li class="page-item ${i === currentPage ? 'active' : ''}">
+                <a class="page-link" href="#" data-page="${i}">${i}</a></li>`;
+        }
+        paginationHTML += `<li class="page-item ${currentPage === totalPages ? 'disabled' : ''}">
+            <a class="page-link" href="#" data-page="${currentPage + 1}">›</a></li>`;
+        paginationHTML += '</ul>';
+        UI.paginationNav.innerHTML = paginationHTML;
+    };
+    
+    const loadAndRenderAccounts = async (page = 1) => {
+        try {
+            const data = await apiCall(`/aws/api/accounts?page=${page}&limit=50`);
+            if (!data) return;
+            currentPage = data.current_page;
             
-            <div class="card-body">
-                <div id="connectedProfileEmptyState" class="oci-empty-state text-center py-5"><div class="mb-2"><i class="bi bi-person-bounding-box fs-2"></i></div><strong>尚未连接 AWS 账号</strong><div class="small mt-2">请先在“账户管理”弹出窗口中选择并连接一个账号。</div></div>
-                <div id="connectedProfileDetails" class="d-none">
-                    <div class="connected-profile-summary mb-3">
-                        <div class="connected-profile-item"><div class="connected-profile-item-label">账户名称</div><div id="connectedProfileAlias" class="connected-profile-item-value compact">-</div></div>
-                        <div class="connected-profile-item"><div class="connected-profile-item-label">Access Key</div><div id="connectedProfileKey" class="connected-profile-item-value compact">-</div></div>
-                        <div class="connected-profile-item"><div class="connected-profile-item-label">默认区域</div><div id="connectedProfileRegion" class="connected-profile-item-value compact text-info">-</div></div>
-                        <div class="connected-profile-item"><div class="connected-profile-item-label">IAM 身份</div><div class="connected-profile-item-value compact">Root / IAM User</div></div>
-                    </div>
-                    <div class="connected-profile-summary-3">
-                        <div class="connected-profile-item"><div class="connected-profile-item-label">连接状态</div><div id="connectedProfileStatusBadge" class="connected-profile-item-value compact"><span class="badge bg-success-subtle text-success border border-success-subtle">已连接</span></div></div>
-                        <div class="connected-profile-item"><div class="connected-profile-item-label">CloudWatch 监控</div><div class="connected-profile-item-value text-success">已启用</div></div>
-                        <div class="connected-profile-item"><div class="connected-profile-item-label">备注</div><div class="connected-profile-item-value text-muted small">AWS Boto3 API Client</div></div>
-                    </div>
-                </div>
-            </div>
-        </section>
+            UI.accountList.innerHTML = data.accounts.length ? data.accounts.map(acc => `
+                <tr data-account-name="${acc.name}">
+                    <td class="align-middle fw-bold">${acc.name}</td>
+                    <td class="align-middle"><code>${acc.access_key || '********'}</code></td>
+                    <td class="align-middle text-info">${acc.default_region || 'us-east-1'}</td>
+                    <td class="text-end align-middle">
+                        <div class="d-flex justify-content-end gap-1">
+                            <button class="btn btn-success btn-sm" data-action="select">连接</button>
+                            <button class="btn btn-info btn-sm text-white" data-action="query-quota">配额</button>
+                            <button class="btn btn-danger btn-sm" data-action="delete"><i class="bi bi-trash"></i></button>
+                        </div>
+                    </td>
+                </tr>`).join('') : '<tr><td colspan="4" class="text-center text-muted py-4">没有已保存的账户</td></tr>';
+            
+            renderPagination(data.total_pages, data.current_page);
+            updateAwsLoginStatus();
+        } catch (error) {
+            UI.accountList.innerHTML = '<tr><td colspan="4" class="text-center text-danger py-4">加载账户列表失败</td></tr>';
+        }
+    };
+    
+    const updateAwsLoginStatus = async () => {
+        try {
+            const data = await apiCall('/aws/api/session');
+            if (data && data.logged_in) {
+                UI.currentAccountStatus.innerHTML = `(当前: <span class="fw-bold text-success">${data.name}</span>)`;
+                setUIState(true);
+                
+                if (UI.connectedProfileEmptyState) UI.connectedProfileEmptyState.classList.add('d-none');
+                if (UI.connectedProfileDetails) UI.connectedProfileDetails.classList.remove('d-none');
+                if (UI.connectedProfileAlias) UI.connectedProfileAlias.textContent = data.name;
+                
+                let maskedAk = '********';
+                const accountRow = document.querySelector(`tr[data-account-name="${data.name}"]`);
+                if (accountRow) {
+                    const codeEl = accountRow.querySelector('code');
+                    if (codeEl) maskedAk = codeEl.textContent;
+                }
+                if (UI.connectedProfileKey) UI.connectedProfileKey.textContent = maskedAk;
+                if (UI.connectedProfileRegion) UI.connectedProfileRegion.textContent = UI.regionSelector.value || 'us-east-1';
 
-        <section class="card oci-section-card">
-            <div class="card-header d-flex justify-content-between align-items-center gap-3 flex-wrap">
-                <div>
-                    <div class="oci-card-title"><i class="bi bi-server"></i><span>实例列表 (当前区域)</span></div>
-                    <div class="oci-panel-note mt-2">管理当前区域内的 EC2 与 Lightsail 实例。</div>
-                </div>
-                <div class="d-flex gap-2 flex-wrap">
-                    <button id="querySelectedRegionBtn" class="btn btn-sm btn-primary" disabled><i class="bi bi-arrow-clockwise"></i> 刷新当前区域</button>
-                    <button id="queryAllRegionsBtn" class="btn btn-sm btn-outline-info" disabled><i class="bi bi-search"></i> 查询所有区域</button>
-                </div>
-            </div>
-            <div class="card-body p-0">
-                <div class="table-responsive">
-                    <table class="table table-hover mb-0">
-                        <thead>
-                            <tr>
-                                <th style="width: 25%; padding-left: 1rem;">实例名称</th>
-                                <th class="text-center" style="width: 15%;">状态</th>
-                                <th class="text-center" style="width: 20%;">公网 IP</th>
-                                <th class="text-center" style="width: 10%;">类型</th>
-                                <th class="text-center" style="width: 15%;">所在区域</th>
-                                <th class="text-center" style="width: 15%;">运行时间</th>
-                            </tr>
-                        </thead>
-                        <tbody id="instanceList"><tr><td colspan="6" class="text-center text-muted py-5">请先连接账户并点击刷新</td></tr></tbody>
-                    </table>
-                </div>
-            </div>
-            <div class="card-footer text-center py-3">
-                <div id="instanceActionGroup" class="action-group">
-                    <button type="button" id="startBtn" class="btn btn-success" disabled>启动</button>
-                    <button type="button" id="stopBtn" class="btn btn-danger" disabled>关机</button>
-                    <button type="button" id="restartBtn" class="btn btn-warning" disabled>重启</button>
-                    <button type="button" id="changeIpBtn" class="btn btn-info" disabled>更换IP</button>
-                    <button type="button" id="deleteBtn" class="btn btn-danger" disabled>删除/终止</button>
-                </div>
-            </div>
-        </section>
+                loadRegions();
+            } else {
+                UI.currentAccountStatus.innerHTML = `(<span class="fw-bold text-danger">未选择</span>)`;
+                setUIState(false);
+                UI.regionSelector.innerHTML = '<option>请先选择AWS账户</option>';
+                
+                if (UI.connectedProfileEmptyState) UI.connectedProfileEmptyState.classList.remove('d-none');
+                if (UI.connectedProfileDetails) UI.connectedProfileDetails.classList.add('d-none');
+                
+                // --- 还原顶部区域卡片状态 ---
+                if (UI.currentRegionStatValue) UI.currentRegionStatValue.textContent = '未连接';
+                if (UI.currentRegionStatSub) UI.currentRegionStatSub.textContent = '请先选择并连接 AWS 账户';
+            }
+        } catch (error) { setUIState(false); }
+    };
+    
+    const loadRegions = async () => {
+        log('正在加载区域列表...');
+        try {
+            const regions = await apiCall('/aws/api/regions');
+            if (!regions) return;
+            UI.regionSelector.innerHTML = regions.map(r => 
+                `<option 
+                    value="${r.code}" 
+                    data-enabled="${r.enabled}" 
+                    data-supports-lightsail="${r.supports_lightsail}">
+                    ${r.name} ${r.enabled ? '' : '(未激活)'}
+                </option>`
+            ).join('');
 
-        <section class="card oci-section-card">
-            <div class="card-header d-flex justify-content-between align-items-center gap-3 flex-wrap">
-                <div class="oci-card-title"><i class="bi bi-terminal-split"></i><span>任务与日志输出</span></div>
-                <button id="clearLogBtn" class="btn btn-sm btn-outline-secondary">清除日志</button>
-            </div>
-            <div class="card-body p-2">
-                <div id="logOutput" class="form-control oci-log" style="height: 250px; overflow-y: auto;"></div>
-            </div>
-        </section>
-    </div>
-</div>
+            const defaultRegion = 'us-east-1';
+            const optionExists = Array.from(UI.regionSelector.options).some(opt => opt.value === defaultRegion);
+            if (optionExists) {
+                UI.regionSelector.value = defaultRegion;
+            }
+            
+            log('区域列表加载成功。', 'success');
+            // 手动触发一次 change 事件以更新相关的卡片 UI
+            UI.regionSelector.dispatchEvent(new Event('change'));
+        } catch (error) { /* handled */ }
+    };
+    
+    const openInstanceTypeModal = async (type) => {
+        const region = UI.regionSelector.value;
+        const modal = (type === 'ec2') ? UI.ec2TypeModal : UI.lightsailTypeModal;
+        const selector = (type === 'ec2') ? UI.ec2TypeSelector : UI.lightsailTypeSelector;
+        const spinner = (type === 'ec2') ? UI.ec2Spinner : UI.lightsailSpinner;
+        const endpoint = (type === 'ec2') ? `/aws/api/ec2-instance-types?region=${region}` : `/aws/api/lightsail-bundles?region=${region}`;
+        if (type === 'ec2') { UI.ec2DiskSize.value = ''; }
+        modal.show();
+        spinner.style.display = 'block';
+        selector.innerHTML = '<option>正在加载...</option>';
+        try {
+            const data = await apiCall(endpoint);
+            if (!data) throw new Error("未能获取实例类型数据");
+            const format = (type === 'ec2')
+                ? data.map(t => `<option value="${t.value}">${t.text}${t.value.includes('micro') ? ' (免费套餐可用)' : ''}</option>`).join('')
+                : data.map(b => `<option value="${b.id}">${b.name}</option>`).join('');
+            selector.innerHTML = format;
+        } catch (error) { selector.innerHTML = `<option>加载失败: ${error.message}</option>`; }
+        finally { spinner.style.display = 'none'; }
+    };
+    
+    const createInstance = async (type) => {
+        const finalUserData = UI.userData.value;
+        const payload = {
+            region: UI.regionSelector.value,
+            user_data: finalUserData,
+            ...(type === 'ec2' ? { instance_type: UI.ec2TypeSelector.value } : { bundle_id: UI.lightsailTypeSelector.value })
+        };
+        if (type === 'ec2') {
+            const diskSizeInput = UI.ec2DiskSize.value.trim();
+            if (diskSizeInput) {
+                const diskSize = parseInt(diskSizeInput, 10);
+                if (!isNaN(diskSize) && diskSize > 0) { payload.disk_size = diskSize; }
+            }
+        }
+        (type === 'ec2' ? UI.ec2TypeModal : UI.lightsailTypeModal).hide();
+        log(`请求在 ${payload.region} 创建 ${type.toUpperCase()} 实例...`);
+        if (payload.disk_size) { log(`自定义硬盘大小: ${payload.disk_size} GB`); }
+        log(`发送的 User Data 脚本:\n${finalUserData}`);
+        try {
+            const data = await apiCall(`/aws/api/instances/${type}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+            if (data && data.task_id) startLogPolling(data.task_id);
+        } catch (error) { /* apiCall函数已处理日志 */ }
+    };
+    
+    const queryQuota = async (accountName, region) => {
+        if (!region) { log('请先在下方“操作区域”中选择一个区域再查询配额。', 'error'); return; }
+        
+        log(`正在为账户 ${accountName} 查询区域 ${region} 的 vCPU 配额...`);
+        try {
+            const data = await apiCall('/aws/api/query-quota', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ account_name: accountName, region: region }) });
+            if (data && data.quota !== undefined) {
+                log(`✅ 账户 ${accountName} 在区域 ${region} 的 vCPU 配额为: ${data.quota}`, 'success');
+                alert(`账户 ${accountName} 的 vCPU 配额: ${data.quota}`);
+            } else {
+                log(`账户 ${accountName} 的 vCPU 配额查询未能返回有效数据。`, 'error');
+            }
+        } catch (error) {
+            log(`账户 ${accountName} 配额查询失败: ${error.message}`, 'error');
+        }
+    };
+    
+    UI.accountList.addEventListener('click', async (event) => {
+        const button = event.target.closest('button[data-action]');
+        if (!button) return;
+        const action = button.dataset.action;
+        const accountName = button.closest('tr').dataset.accountName;
+        if (action === 'select') {
+            log(`正在选择AWS账户 ${accountName}...`);
+            await apiCall('/aws/api/session', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: accountName }) });
+            log(`AWS账户 ${accountName} 选择成功。`, 'success');
+            
+            const modal = bootstrap.Modal.getInstance(document.getElementById('accountsModal'));
+            if (modal) modal.hide();
+            
+            updateAwsLoginStatus();
+        } else if (action === 'delete') {
+            if (!confirm(`确定要删除AWS账户 ${accountName} 吗？`)) return;
+            await apiCall(`/aws/api/accounts/${accountName}`, { method: 'DELETE' });
+            log(`AWS账户 ${accountName} 删除成功。`, 'success');
+            loadAndRenderAccounts(1);
+        } else if (action === 'query-quota') {
+            const region = UI.regionSelector.value || 'us-east-1';
+            queryQuota(accountName, region);
+        }
+    });
+    
+    UI.saveAccountBtn.addEventListener('click', async (e) => {
+        e.preventDefault();
+        const form = document.getElementById('addAccountForm');
+        
+        const name = form.querySelector('input[name="name"]').value.trim();
+        const access_key = form.querySelector('input[name="access_key"]').value.trim();
+        const secret_key = form.querySelector('input[name="secret_key"]').value.trim();
+        
+        if (!name || !access_key || !secret_key) return alert('所有字段均为必填项！');
+        
+        const originalText = UI.saveAccountBtn.innerText;
+        UI.saveAccountBtn.disabled = true;
+        UI.saveAccountBtn.innerText = '保存中...';
 
-<div class="modal fade" id="accountsModal" tabindex="-1">
-    <div class="modal-dialog modal-dialog-centered modal-xl">
-        <div class="modal-content">
-            <div class="modal-header align-items-center">
-                <div class="flex-grow-1">
-                    <h5 class="modal-title">AWS 账户管理</h5>
-                    <div class="oci-modal-lead">在此连接、切换和删除您的 AWS 账户凭证。</div>
-                </div>
-                <div class="d-flex align-items-center gap-3 pe-3">
-                    <button class="btn btn-sm rounded-pill text-white px-3 py-2 fw-bold" style="background: linear-gradient(135deg, #0ea5e9, #3b82f6); border: none; box-shadow: 0 4px 12px rgba(59, 130, 246, 0.25);" data-bs-toggle="modal" data-bs-target="#addAccountModal">
-                        <i class="bi bi-person-plus-fill me-1"></i> 添加新账户
-                    </button>
-                </div>
-                <button type="button" class="btn-close m-0 ms-2" data-bs-dismiss="modal"></button>
-            </div>
-            <div class="modal-body">
-                <div class="table-responsive">
-                    <table class="table table-hover">
-                        <thead><tr><th>账户名称</th><th>Access Key</th><th>默认区域</th><th class="text-end">操作</th></tr></thead>
-                        <tbody id="accountList"></tbody>
-                    </table>
-                </div>
-                <div id="pagination-nav" class="mt-3 d-flex justify-content-center"></div>
-            </div>
-        </div>
-    </div>
-</div>
+        try {
+            await apiCall('/aws/api/accounts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, access_key, secret_key }) });
+            log(`账户 ${name} 添加成功。`, 'success');
+            form.reset();
+            
+            const addModal = bootstrap.Modal.getInstance(document.getElementById('addAccountModal'));
+            if (addModal) addModal.hide();
+            
+            loadAndRenderAccounts(1);
+        } catch (error) { 
+            alert(`添加失败: ${error.message}`); 
+        } finally {
+            UI.saveAccountBtn.disabled = false;
+            UI.saveAccountBtn.innerText = originalText;
+        }
+    });
+    
+    if (UI.paginationNav) {
+        UI.paginationNav.addEventListener('click', (event) => {
+            event.preventDefault();
+            const link = event.target.closest('a.page-link');
+            if (link) {
+                const page = parseInt(link.dataset.page, 10);
+                if (!isNaN(page)) {
+                    loadAndRenderAccounts(page);
+                }
+            }
+        });
+    }
+    
+    UI.queryAllQuotasBtn.addEventListener('click', () => {
+        const region = UI.regionSelector.value;
+        if (!region || UI.regionSelector.disabled) { log('请先选择一个账户和一个区域再执行此操作。', 'error'); return; }
+        log(`开始为所有账户查询区域 ${region} 的 vCPU 配额...`);
+        const rows = UI.accountList.querySelectorAll('tr[data-account-name]');
+        rows.forEach(row => {
+            const accountName = row.dataset.accountName;
+            queryQuota(accountName, region);
+        });
+    });
 
-<div class="modal fade" id="addAccountModal" tabindex="-1">
-    <div class="modal-dialog modal-dialog-centered">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title">添加 AWS 账户</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-            </div>
-            <div class="modal-body">
-                <form id="addAccountForm">
-                    <div class="mb-3">
-                        <label class="form-label">账户名称 (自定义)</label>
-                        <input type="text" class="form-control" name="name" placeholder="例如: aws-sg-1" required>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Access Key ID</label>
-                        <input type="text" class="form-control" name="access_key" placeholder="AKIA..." required>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Secret Access Key</label>
-                        <input type="password" class="form-control" name="secret_key" placeholder="在此输入您的密钥" required>
-                    </div>
-                    <div class="text-end mt-4">
-                        <button type="button" class="btn btn-secondary me-2" data-bs-dismiss="modal">取消</button>
-                        <button type="submit" class="btn btn-primary" id="saveAccountBtn">保存账户</button>
-                    </div>
-                </form>
-            </div>
-        </div>
-    </div>
-</div>
+    UI.regionSelector.addEventListener('change', () => {
+        const selectedOption = UI.regionSelector.options[UI.regionSelector.selectedIndex];
+        if (selectedOption) {
+            const isEnabled = (selectedOption.dataset.enabled === 'true');
+            const supportsLightsail = (selectedOption.dataset.supportsLightsail === 'true');
 
-<div class="modal fade" id="regionQuotaModal" tabindex="-1">
-    <div class="modal-dialog modal-dialog-centered modal-lg">
-        <div class="modal-content">
-            <div class="modal-header">
-                <div><h5 class="modal-title">全局区域与配额管理</h5><div class="oci-modal-lead">选择区域及查询全局 vCPU 配额，并一键激活未开通的区域。</div></div>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-            </div>
-            <div class="modal-body">
-                <div class="d-flex justify-content-between align-items-center mb-3">
-                    <h6 class="mb-0 fw-bold text-white">当前选中操作区域：</h6>
-                    <div class="d-flex gap-2">
-                        <select id="regionSelector" class="form-select form-select-sm" style="width: auto; min-width: 250px;">
-                            <option value="us-east-1" selected>us-east-1 (美国东部)</option>
-                            <option value="ap-northeast-1">ap-northeast-1 (东京)</option>
-                            <option value="ap-southeast-1">ap-southeast-1 (新加坡)</option>
-                        </select>
-                        <button id="setDefaultRegionBtn" class="btn btn-sm btn-primary" disabled>确定</button>
-                        <button id="activateRegionBtn" class="btn btn-sm btn-outline-warning" disabled>激活此区域</button>
-                    </div>
-                </div>
-                <hr>
-                <div class="text-center py-4">
-                    <button id="queryAllQuotasBtn" class="btn btn-info px-4 py-2" disabled><i class="bi bi-cpu"></i> 一键查询当前区域 vCPU 配额</button>
-                    <div class="form-text mt-2">查询结果将直接输出到主面板的“任务与日志输出”窗口中。</div>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
+            UI.activateRegionBtn.disabled = isEnabled;
+            UI.activateRegionBtn.className = isEnabled ? 'btn btn-sm btn-secondary' : 'btn btn-sm btn-warning';
 
-<div class="modal fade" id="ec2TypeModal" tabindex="-1">
-    <div class="modal-dialog modal-dialog-centered"><div class="modal-content"><div class="modal-header"><h5 class="modal-title">创建 EC2 实例</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><div class="mb-3"><label class="form-label">自定义开机脚本 (User Data)</label><textarea class="form-control" id="userData" rows="3" placeholder="#!/bin/bash&#10;echo 'Hello World' > /tmp/hello.txt"></textarea></div><div id="ec2Spinner" class="text-center mb-3" style="display: none;"><div class="spinner-border text-primary" role="status"></div></div><select id="ec2TypeSelector" class="form-select mb-3"></select><div><label for="ec2DiskSize" class="form-label">根卷大小 (GB)</label><input type="number" class="form-control" id="ec2DiskSize" placeholder="留空则使用默认"><div class="form-text">输入整数。</div></div></div><div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button><button type="button" id="confirmEc2CreationBtn" class="btn btn-primary">确认创建</button></div></div></div>
-</div>
+            UI.createEc2Btn.disabled = !isEnabled;
+            UI.createEc2Btn.title = isEnabled ? '创建 EC2 实例' : '请先激活此区域后再创建实例';
 
-<div class="modal fade" id="lightsailTypeModal" tabindex="-1">
-    <div class="modal-dialog modal-dialog-centered"><div class="modal-content"><div class="modal-header"><h5 class="modal-title">创建 Lightsail 实例</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><div id="lightsailSpinner" class="text-center mb-3" style="display: none;"><div class="spinner-border text-primary" role="status"></div></div><select id="lightsailTypeSelector" class="form-select"></select></div><div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button><button type="button" id="confirmLightsailCreationBtn" class="btn btn-primary">确认创建</button></div></div></div>
-</div>
-{% endblock %}
+            UI.createLsBtn.disabled = !isEnabled || !supportsLightsail;
+            UI.createLsBtn.title = !isEnabled ? '请先激活此区域' : (!supportsLightsail ? '此区域不支持Lightsail' : '创建 Lightsail 实例');
+            
+            // --- 同步更新所有关联该区域的UI展示 ---
+            if (UI.connectedProfileRegion) {
+                UI.connectedProfileRegion.textContent = UI.regionSelector.value;
+            }
+            if (UI.currentRegionStatValue) {
+                UI.currentRegionStatValue.textContent = selectedOption.value; // e.g. ap-northeast-1
+                // 截取类似 "(东京)" 这样的格式用于展示
+                let displayName = selectedOption.text.replace(selectedOption.value, '').trim();
+                if (!displayName) displayName = '未知区域';
+                UI.currentRegionStatSub.textContent = displayName;
+            }
+        }
+    });
 
-{% block scripts %}
-<script src="{{ url_for('static', filename='js/aws_script.js', v='2026040505') }}"></script>
-{% endblock %}
+    UI.activateRegionBtn.addEventListener('click', async () => {
+        const region = UI.regionSelector.value;
+        if (!region || UI.activateRegionBtn.disabled) return;
+        if (!confirm(`确定要激活区域 ${region} 吗？`)) return;
+        try {
+            const data = await apiCall('/aws/api/activate-region', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ region }) });
+            if(data && data.task_id) startLogPolling(data.task_id);
+        } catch(e) {}
+    });
+    
+    if (UI.setDefaultRegionBtn) {
+        UI.setDefaultRegionBtn.addEventListener('click', () => {
+            const modal = bootstrap.Modal.getInstance(document.getElementById('regionQuotaModal'));
+            if (modal) modal.hide();
+            
+            if (UI.querySelectedRegionBtn && !UI.querySelectedRegionBtn.disabled) {
+                UI.querySelectedRegionBtn.click();
+            }
+        });
+    }
+
+    UI.querySelectedRegionBtn.addEventListener('click', () => {
+        selectedInstance = null;
+        updateActionButtonsState();
+        const region = UI.regionSelector.value;
+        log(`正在查询区域 ${region} 的实例...`);
+        UI.instanceList.innerHTML = `<tr><td colspan="6" class="text-center">查询中... <div class="spinner-border spinner-border-sm"></div></td></tr>`;
+        apiCall(`/aws/api/instances?region=${region}`).then(instances => {
+            UI.instanceList.innerHTML = '';
+            if (instances && instances.length > 0) {
+                instances.forEach(renderInstanceRow);
+            } else {
+                UI.instanceList.innerHTML = `<tr><td colspan="6" class="text-center text-muted">该区域无实例</td></tr>`;
+            }
+            log(`区域 ${region} 查询完成。`, 'success');
+        }).catch(error => {
+            UI.instanceList.innerHTML = `<tr><td colspan="6" class="text-center text-danger">查询失败: ${error.message}</td></tr>`;
+        });
+    });
+    UI.queryAllRegionsBtn.addEventListener('click', () => {
+        selectedInstance = null;
+        updateActionButtonsState();
+        log("即将查询所有区域，过程可能较慢，请稍候...");
+        apiCall('/aws/api/query-all-instances', { method: 'POST' })
+            .then(data => {
+                if(data && data.task_id) startLogPolling(data.task_id);
+            });
+    });
+    
+    if (UI.disconnectAccountBtn) {
+        UI.disconnectAccountBtn.addEventListener('click', async () => {
+            if (!confirm('确定要断开当前账号的连接吗？')) return;
+            try {
+                await apiCall('/aws/api/session', { method: 'DELETE' });
+                log('已断开当前账户连接。', 'success');
+                updateAwsLoginStatus();
+                UI.instanceList.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-5">请先连接账户并点击刷新</td></tr>';
+            } catch (error) {}
+        });
+    }
+    
+    UI.startBtn.addEventListener('click', () => handleActionClick('start'));
+    UI.stopBtn.addEventListener('click', () => handleActionClick('stop'));
+    UI.restartBtn.addEventListener('click', () => handleActionClick('restart'));
+    UI.changeIpBtn.addEventListener('click', () => handleActionClick('change-ip'));
+    UI.deleteBtn.addEventListener('click', () => handleActionClick('delete'));
+    UI.createEc2Btn.addEventListener('click', () => openInstanceTypeModal('ec2'));
+    UI.createLsBtn.addEventListener('click', () => openInstanceTypeModal('lightsail'));
+    UI.confirmEc2CreationBtn.addEventListener('click', () => createInstance('ec2'));
+    UI.confirmLightsailCreationBtn.addEventListener('click', () => createInstance('lightsail'));
+    UI.clearLogBtn.addEventListener('click', () => { UI.logOutput.innerHTML = ''; });
+    
+    // --- 初始化 ---
+    loadAndRenderAccounts();
+});
