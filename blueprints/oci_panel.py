@@ -1361,29 +1361,34 @@ def get_available_os_versions():
     try:
         compute_client = g.oci_clients['compute']
         tenancy_ocid = g.oci_config['tenancy']
+        
+        logging.info("Fetching available OS versions...")
+        
+        # 设定你想获取的官方 OS 列表
+        target_oses = ["Canonical Ubuntu", "Oracle Linux"]
+        result = []
+        
+        for os_name in target_oses:
+            images = oci.pagination.list_call_get_all_results(
+                compute_client.list_images,
+                compartment_id=tenancy_ocid,
+                operating_system=os_name,
+                sort_by="TIMECREATED",
+                sort_order="DESC"
+            ).data
 
-        logging.info("Fetching available Ubuntu versions...")
-
-        # ✨ 修复点 1：放弃极其耗时的 getAll 翻页查询，只取最新的 50 个镜像即可
-        images = compute_client.list_images(
-            compartment_id=tenancy_ocid,
-            operating_system="Canonical Ubuntu",
-            sort_by="TIMECREATED",
-            sort_order="DESC",
-            limit=50
-        ).data
-
-        versions = set()
-        for img in images:
-            v = img.operating_system_version
-            if v and re.match(r'^\d+\.\d+$', v):
-                versions.add(v)
-
-        sorted_versions = sorted(list(versions), reverse=True)
-        latest_versions = sorted_versions[:2]
-
-        result = [f"Canonical Ubuntu-{v}" for v in latest_versions]
-
+            versions = set()
+            for img in images:
+                v = img.operating_system_version
+                # 过滤掉精简版或带特殊架构后缀的版本，保持列表清爽
+                if v and 'Minimal' not in v and 'aarch64' not in v:
+                    versions.add(v)
+            
+            # 排序并取最新的 2 个版本
+            sorted_versions = sorted(list(versions), reverse=True)[:2]
+            for v in sorted_versions:
+                result.append(f"{os_name}-{v}")
+        
         return jsonify(result)
 
     except TimeoutException:
@@ -1391,7 +1396,6 @@ def get_available_os_versions():
     except Exception as e:
         logging.error(f"Failed to get OS versions: {e}", exc_info=True)
         return jsonify({"error": f"获取操作系统列表失败: {e}"}), 500
-
 
 @oci_bp.route('/api/available-shapes')
 @login_required
@@ -1403,54 +1407,84 @@ def get_available_shapes():
         if not os_name_version:
             return jsonify({"error": "缺少 os_name_version 参数"}), 400
 
-        os_name, os_version = os_name_version.split('-')
+        # 防止版本号带有 '-' 导致 split 报错
+        os_name, os_version = os_name_version.split('-', 1)
         compute_client = g.oci_clients['compute']
         tenancy_ocid = g.oci_config['tenancy']
-
-        logging.info(f"Fetching shapes for {os_name_version}...")
-
-        # ✨ 修复点 2：仅查询一次该系统最新镜像的 ID
+        
+        # ==========================================
+        # 核心逻辑：自动检测账号是否为升级号 (PAYG)
+        # ==========================================
+        is_upgraded = False
+        try:
+            limits_client = oci.limits.LimitsClient(g.oci_config)
+            proxy_url = g.oci_config.get('proxy')
+            if proxy_url:
+                limits_client.base_client.session.proxies = {'http': proxy_url, 'https': proxy_url}
+                
+            # 查询 Compute 服务的配额限制
+            limits = oci.pagination.list_call_get_all_results(
+                limits_client.list_limit_values,
+                compartment_id=tenancy_ocid,
+                service_name="compute"
+            ).data
+            
+            for limit in limits:
+                # 免费号的 standard-core-count (标准实例核心数) 通常为 0
+                # 只有升级号才会有大于 0 的配额
+                if limit.name == "standard-core-count" and limit.value > 0:
+                    is_upgraded = True
+                    break
+        except Exception as e:
+            logging.warning(f"检测账号配额失败，为防误杀，默认按升级号处理: {e}")
+            is_upgraded = True 
+        # ==========================================
+        
+        logging.info(f"Fetching shapes for {os_name} {os_version}... (is_upgraded={is_upgraded})")
+        
+        # 获取该操作系统的最新镜像，取前几个就能覆盖 ARM 和 x86 架构
         images = compute_client.list_images(
             compartment_id=tenancy_ocid,
             operating_system=os_name,
             operating_system_version=os_version,
             sort_by="TIMECREATED",
             sort_order="DESC",
-            limit=1
+            limit=10
         ).data
 
-        if not images:
-            return jsonify([])
+        valid_shapes = set()
+        checked_images = 0
+        
+        for img in images:
+            if checked_images >= 3: 
+                break
+            try:
+                compat_entries = oci.pagination.list_call_get_all_results(
+                    compute_client.list_image_shape_compatibility_entries,
+                    image_id=img.id
+                ).data
+                
+                found_shapes = False
+                for entry in compat_entries:
+                    shape = entry.shape
+                    if shape.startswith('VM.Standard'):
+                        # --- 核心过滤逻辑：如果不是升级号，只允许加入免费规格 ---
+                        if not is_upgraded:
+                            if shape not in ['VM.Standard.A1.Flex', 'VM.Standard.E2.1.Micro']:
+                                continue
+                        # ----------------------------------------------------
+                        valid_shapes.add(shape)
+                        found_shapes = True
+                if found_shapes:
+                    checked_images += 1
+            except Exception as e:
+                logging.warning(f"Failed to get compat entries for image {img.id}: {e}")
 
-        image_id = images[0].id
+        valid_shapes_list = list(valid_shapes)
+        # 排序：A1.Flex 和 E2.1.Micro 永远在最前面
+        valid_shapes_list.sort(key=lambda s: (0 if 'A1.Flex' in s else 1 if 'E2.1.Micro' in s else 2, s))
 
-        # ✨ 修复点 3：利用 OCI 原生兼容性接口获取对应规格，一次性全出，无需 For 循环
-        all_shapes = oci.pagination.list_call_get_all_results(
-            compute_client.list_shapes,
-            compartment_id=tenancy_ocid
-        ).data
-
-        allowed_shape_names = set()
-        for shape in all_shapes:
-            if shape.shape.startswith('VM.') and getattr(shape, 'processor_description', ''):
-                proc_desc = shape.processor_description.lower()
-                if 'ampere' in proc_desc or 'amd' in proc_desc:
-                    allowed_shape_names.add(shape.shape)
-
-        compatibility_entries = oci.pagination.list_call_get_all_results(
-            compute_client.list_image_shape_compatibility_entries,
-            image_id=image_id
-        ).data
-
-        valid_shapes_for_os = []
-        for entry in compatibility_entries:
-            if entry.shape in allowed_shape_names:
-                valid_shapes_for_os.append(entry.shape)
-
-        valid_shapes_for_os = list(set(valid_shapes_for_os))
-        valid_shapes_for_os.sort(key=lambda s: ('A1.Flex' not in s and 'E2.1.Micro' not in s, s))
-
-        return jsonify(valid_shapes_for_os)
+        return jsonify(valid_shapes_list)
 
     except TimeoutException:
         return jsonify({"error": "获取可用实例规格超时。"}), 504
