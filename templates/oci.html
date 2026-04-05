@@ -222,19 +222,19 @@
                 <div class="d-flex align-items-center gap-3 pe-3">
                     <span class="badge bg-primary d-none" id="profilesModalCurrentStatus"></span>
                     
-                    <button id="batchDeleteProfilesBtn" class="btn btn-sm rounded-pill text-white px-3 py-2 fw-bold" disabled
-                            style="background: linear-gradient(135deg, #ef4444, #dc2626); border: none; box-shadow: 0 4px 12px rgba(239, 68, 68, 0.25); transition: transform 0.2s ease, box-shadow 0.2s ease;" 
-                            onmouseover="if(!this.disabled){this.style.transform='translateY(-1px)'; this.style.boxShadow='0 6px 16px rgba(239, 68, 68, 0.35)';}" 
-                            onmouseout="if(!this.disabled){this.style.transform='translateY(0)'; this.style.boxShadow='0 4px 12px rgba(239, 68, 68, 0.25)';}">
-                        <i class="bi bi-trash-fill me-1"></i> 删除选中
-                    </button>
-
                     <button id="showAddAccountModalBtn" class="btn btn-sm rounded-pill text-white px-3 py-2 fw-bold" 
                             style="background: linear-gradient(135deg, #0ea5e9, #3b82f6); border: none; box-shadow: 0 4px 12px rgba(59, 130, 246, 0.25); transition: transform 0.2s ease, box-shadow 0.2s ease;" 
                             data-bs-toggle="modal" data-bs-target="#addAccountModal" 
                             onmouseover="this.style.transform='translateY(-1px)'; this.style.boxShadow='0 6px 16px rgba(59, 130, 246, 0.35)';" 
                             onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 4px 12px rgba(59, 130, 246, 0.25)';">
                         <i class="bi bi-person-plus-fill me-1"></i> 添加新账户
+                    </button>
+
+                    <button id="batchDeleteProfilesBtn" class="btn btn-sm rounded-pill text-white px-3 py-2 fw-bold" disabled
+                            style="background: linear-gradient(135deg, #ef4444, #dc2626); border: none; box-shadow: 0 4px 12px rgba(239, 68, 68, 0.25); transition: transform 0.2s ease, box-shadow 0.2s ease;" 
+                            onmouseover="if(!this.disabled){this.style.transform='translateY(-1px)'; this.style.boxShadow='0 6px 16px rgba(239, 68, 68, 0.35)';}" 
+                            onmouseout="if(!this.disabled){this.style.transform='translateY(0)'; this.style.boxShadow='0 4px 12px rgba(239, 68, 68, 0.25)';}">
+                        <i class="bi bi-trash-fill me-1"></i> 删除选中
                     </button>
                 </div>
                 
@@ -253,8 +253,8 @@
                                 <th id="sortAccountByAlias" style="padding-left: 10px; width: 25%; cursor: pointer;" title="点击按名称拼音排序">
                                     账户(单击管理) <i id="sortAliasIcon" class="bi bi-arrow-down-up text-muted small"></i>
                                 </th>
-                                <th style="width: 25%;">租户名 / 租户 ID</th>
-                                <th style="width: 25%;">账号 / User</th>
+                                <th class="text-center" style="width: 15%;">租户名 / 租户 ID</th>
+                                <th class="text-center" style="width: 35%;">账号 / User</th>
                                 <th class="text-center" id="sortAccountByDate" style="cursor: pointer; width: 15%;" title="点击按时间临时排序">
                                     租户创建时间 <i id="sortIcon" class="bi bi-arrow-down-up text-muted small"></i>
                                 </th>
@@ -1092,12 +1092,12 @@ window.addEventListener('load', () => {
                 tr.dataset.instanceData = JSON.stringify(inst);
                 tr.style.cursor = 'pointer';
                 tr.innerHTML = `
-                    <td style="text-align: left; padding-left: 1rem;">${inst.display_name}</td>
-                    <td><div class="status-cell"><span class="status-dot ${dotClass}"></span><span>${state}</span></div></td>
-                    <td>${inst.public_ip || '无'}</td>
-                    <td>${inst.ipv6_address || '无'}</td>
-                    <td>${inst.ocpus}c / ${inst.memory_in_gbs}g / ${inst.boot_volume_size_gb}</td>
-                    <td>${new Date(inst.time_created).toLocaleString()}</td>`;
+                    <td class="align-middle" style="text-align: left; padding-left: 1rem;">${inst.display_name}</td>
+                    <td class="text-center align-middle"><div class="status-cell justify-content-center d-flex"><span class="status-dot ${dotClass} me-2"></span><span>${state}</span></div></td>
+                    <td class="text-center align-middle">${inst.public_ip || '无'}</td>
+                    <td class="text-center align-middle">${inst.ipv6_address || '无'}</td>
+                    <td class="text-center align-middle">${inst.ocpus}c / ${inst.memory_in_gbs}g / ${inst.boot_volume_size_gb}</td>
+                    <td class="text-center align-middle">${new Date(inst.time_created).toLocaleString()}</td>`;
                 instanceList.appendChild(tr);
             });
         } catch (error) {
@@ -1151,8 +1151,8 @@ window.addEventListener('load', () => {
                             <i class="bi bi-gear-fill me-2 text-info"></i> ${p.alias}
                         </a>
                     </td>
-                    <td class="align-middle"><div class="text-truncate" style="max-width: 150px; font-size: 0.85rem;" title="${cachedTenancy}" id="row-tenancy-${p.alias}">${cachedTenancy}</div></td>
-                    <td class="align-middle"><div class="text-truncate" style="max-width: 150px; font-size: 0.85rem;" title="${cachedUser}" id="row-user-${p.alias}">${cachedUser}</div></td>
+                    <td class="text-center align-middle"><div class="text-truncate mx-auto" style="max-width: 120px; font-size: 0.85rem;" title="${cachedTenancy}" id="row-tenancy-${p.alias}">${cachedTenancy}</div></td>
+                    <td class="text-center align-middle"><div class="text-truncate mx-auto" style="max-width: 280px; font-size: 0.85rem;" title="${cachedUser}" id="row-user-${p.alias}">${cachedUser}</div></td>
                     <td class="text-center align-middle" style="white-space: nowrap;">${dateDisplay}</td>
                 `;
 
