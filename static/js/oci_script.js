@@ -562,12 +562,12 @@ document.addEventListener('DOMContentLoaded', function() {
                     const state = inst.lifecycle_state;
                     let dotClass = state === 'RUNNING' ? 'status-running' : (state === 'STOPPED' ? 'status-stopped' : 'status-other');
                     tr.innerHTML = `
-                        <td style="text-align: left; padding-left: 1rem;">${inst.display_name}</td>
-                        <td><div class="status-cell"><span class="status-dot ${dotClass}"></span><span>${state}</span></div></td>
-                        <td>${inst.public_ip || '无'}</td>
-                        <td>${inst.ipv6_address || '无'}</td>
-                        <td>${inst.ocpus}c / ${inst.memory_in_gbs}g / ${inst.boot_volume_size_gb}</td>
-                        <td>${new Date(inst.time_created).toLocaleString()}</td>`;
+                        <td class="align-middle" style="text-align: left; padding-left: 1rem;">${inst.display_name}</td>
+                        <td class="text-center align-middle"><div class="status-cell justify-content-center d-flex"><span class="status-dot ${dotClass} me-2"></span><span>${state}</span></div></td>
+                        <td class="text-center align-middle">${inst.public_ip || '无'}</td>
+                        <td class="text-center align-middle">${inst.ipv6_address || '无'}</td>
+                        <td class="text-center align-middle">${inst.ocpus}c / ${inst.memory_in_gbs}g / ${inst.boot_volume_size_gb}</td>
+                        <td class="text-center align-middle">${new Date(inst.time_created).toLocaleString()}</td>`;
                     instanceList.appendChild(tr);
                 });
             }
@@ -973,10 +973,10 @@ document.addEventListener('DOMContentLoaded', function() {
                         </a>
                     </td>
                     <td class="align-middle">
-                        <div class="text-truncate" style="max-width: 150px; font-size: 0.85rem;" title="${cachedTenancy}" id="row-tenancy-${p.alias}">${cachedTenancy}</div>
+                        <div class="text-truncate mx-auto" style="max-width: 120px; font-size: 0.85rem;" title="${cachedTenancy}" id="row-tenancy-${p.alias}">${cachedTenancy}</div>
                     </td>
-                    <td class="align-middle">
-                        <div class="text-truncate" style="max-width: 150px; font-size: 0.85rem;" title="${cachedUser}" id="row-user-${p.alias}">${cachedUser}</div>
+                    <td class="text-center align-middle">
+                        <div class="text-truncate mx-auto" style="max-width: 280px; font-size: 0.85rem;" title="${cachedUser}" id="row-user-${p.alias}">${cachedUser}</div>
                     </td>
                     <td class="text-center align-middle" style="white-space: nowrap;">
                         ${dateDisplay}
