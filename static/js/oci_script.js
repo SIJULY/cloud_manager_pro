@@ -976,10 +976,10 @@ document.addEventListener('DOMContentLoaded', function() {
                         <div class="text-truncate mx-auto" style="max-width: 120px; font-size: 0.85rem;" title="${cachedTenancy}" id="row-tenancy-${p.alias}">${cachedTenancy}</div>
                     </td>
                     <td class="text-center align-middle">
-                        <div class="text-truncate mx-auto" style="max-width: 280px; font-size: 0.85rem;" title="${cachedUser}" id="row-user-${p.alias}">${cachedUser}</div>
+                        <div class="text-truncate mx-auto text-center" style="max-width: 120px; font-size: 0.85rem;" title="${cachedTenancy}" id="row-tenancy-${p.alias}">${cachedTenancy}</div>
                     </td>
-                    <td class="text-center align-middle" style="white-space: nowrap;">
-                        ${dateDisplay}
+                    <td class="text-center align-middle">
+                        <div class="text-truncate mx-auto text-center" style="max-width: 280px; font-size: 0.85rem;" title="${cachedUser}" id="row-user-${p.alias}">${cachedUser}</div>
                     </td>
                 `;
 
