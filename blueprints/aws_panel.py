@@ -189,25 +189,41 @@ def aws_index():
 def manage_accounts():
     if request.method == "GET":
         page = request.args.get('page', 1, type=int)
-        limit = request.args.get('limit', 5, type=int)
+        limit = request.args.get('limit', 50, type=int) # 放宽限制，单页显示50个
         all_keys = load_keys(KEY_FILE)
         all_keys.sort(key=lambda x: x['name'])
         total_accounts = len(all_keys)
-        total_pages = math.ceil(total_accounts / limit)
+        total_pages = math.ceil(total_accounts / limit) if limit > 0 else 1
         start = (page - 1) * limit
         end = start + limit
         paginated_keys = all_keys[start:end]
+        
+        # 修复：在这里加上 access_key 和 默认区域，并保持原有的分页结构
+        formatted_accounts = []
+        for k in paginated_keys:
+            ak = k.get("access_key", "")
+            masked_ak = f"{ak[:4]}****{ak[-4:]}" if len(ak) > 8 else "********"
+            formatted_accounts.append({
+                "name": k["name"],
+                "access_key": masked_ak,
+                "default_region": "us-east-1"
+            })
+            
         return jsonify({
-            "accounts": [{"name": k["name"]} for k in paginated_keys],
+            "accounts": formatted_accounts,
             "total_accounts": total_accounts,
             "total_pages": total_pages,
             "current_page": page
         })
-    data = request.json; keys = load_keys(KEY_FILE)
-    if any(k['name'] == data['name'] for k in keys): return jsonify({"error": "账户名称已存在"}), 400
-    keys.append(data); save_keys(KEY_FILE, keys)
+        
+    data = request.json
+    keys = load_keys(KEY_FILE)
+    if any(k['name'] == data['name'] for k in keys): 
+        return jsonify({"error": "账户名称已存在"}), 400
+    keys.append(data)
+    save_keys(KEY_FILE, keys)
     return jsonify({"success": True, "name": data['name']}), 201
-
+    
 @aws_bp.route("/api/accounts/<name>", methods=["DELETE"])
 @login_required
 def delete_account(name):
