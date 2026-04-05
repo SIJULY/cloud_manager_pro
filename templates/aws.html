@@ -108,12 +108,12 @@
                 <div class="oci-stat-value">Regions & Quotas</div>
                 <div class="oci-stat-sub">选择默认区域及查询 vCPU 配额</div>
             </button>
-            <button type="button" class="oci-stat-card success text-start border-0 w-100" id="createInstanceHeroBtn" disabled>
-                <div class="oci-stat-icon"><i class="bi bi-plus-circle"></i></div>
-                <div class="oci-stat-label">实例创建</div>
-                <div class="oci-stat-value">Launch Instances</div>
-                <div class="oci-stat-sub">在当前连接账户中快速部署</div>
-            </button>
+            <div class="oci-stat-card success text-start border-0 w-100">
+                <div class="oci-stat-icon"><i class="bi bi-geo-alt-fill"></i></div>
+                <div class="oci-stat-label">当前连接区域</div>
+                <div class="oci-stat-value" id="currentRegionStatValue">未连接</div>
+                <div class="oci-stat-sub" id="currentRegionStatSub">请先选择并连接 AWS 账户</div>
+            </div>
         </section>
 
         <section class="card oci-section-card connected-profile-card">
@@ -220,6 +220,7 @@
                         <tbody id="accountList"></tbody>
                     </table>
                 </div>
+                <div id="pagination-nav" class="mt-3 d-flex justify-content-center"></div>
             </div>
         </div>
     </div>
