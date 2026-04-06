@@ -1593,7 +1593,7 @@ document.addEventListener('DOMContentLoaded', function() {
     async function loadSnatchTasks() {
         runningSnatchTasksList.innerHTML = '<li class="list-group-item">正在加载...</li>';
         completedSnatchTasksList.innerHTML = '<li class="list-group-item">正在加载...</li>';
-
+        
         stopSnatchTaskBtn.disabled = true;
         resumeSnatchTaskBtn.disabled = true;
         deleteSnatchTaskBtn.disabled = true;
@@ -1601,13 +1601,13 @@ document.addEventListener('DOMContentLoaded', function() {
 
         document.getElementById('selectAllRunningTasks').checked = false;
         document.getElementById('selectAllCompletedTasks').checked = false;
-
+        
         try {
             const [running, completed] = await Promise.all([
                 apiRequest('/oci/api/tasks/snatching/running'),
                 apiRequest('/oci/api/tasks/snatching/completed')
             ]);
-
+            
             if (running && running.length > 0) {
                 if (!window.taskPollers) window.taskPollers = {};
                 running.forEach(task => {
@@ -1617,29 +1617,36 @@ document.addEventListener('DOMContentLoaded', function() {
                 });
             }
 
+            // 渲染正在运行的任务
             runningSnatchTasksList.innerHTML = running.length === 0
-                ? '<li class="list-group-item text-muted text-center py-4"><div class="mb-2"><i class="bi bi-inboxes fs-4"></i></div>没有正在运行或已暂停的任务。</li>'
+                ? '<li class="list-group-item text-muted">没有正在运行或已暂停的任务。</li>'
                 : running.map(task => {
                     if (task.result && typeof task.result === 'object' && task.result.details) {
                         const { details, start_time, attempt_count, last_message } = task.result;
                         const taskName = details.display_name_prefix || details.name;
                         const isPaused = task.status === 'paused';
-                        const statusBadge = isPaused
+                        const statusBadge = isPaused 
                             ? `<span class="badge bg-secondary">已暂停</span>`
                             : `<span class="badge bg-warning text-dark">第 ${attempt_count} 次尝试</span>`;
                         const progressBar = isPaused
                             ? `<div class="progress" style="height: 5px;"><div class="progress-bar bg-secondary" style="width: 100%"></div></div>`
                             : `<div class="progress" style="height: 5px;"><div class="progress-bar progress-bar-striped progress-bar-animated" style="width: 100%"></div></div>`;
-
+                        
                         const configString = `<strong>配置:</strong> ${details.shape} / ${details.ocpus || 'N/A'} OCPU / ${details.memory_in_gbs || 'N/A'} GB / ${details.boot_volume_size || 'N/A'} GB<br><strong>系统:</strong> ${details.os_name_version}`;
 
                         return `
-                        <li class="list-group-item" data-task-id="${task.id}" data-task-status="${task.status}">
+                        <li class="list-group-item py-2" data-task-id="${task.id}" data-task-status="${task.status}">
                             <div class="row align-items-center">
-                                <div class="col-auto"><input class="form-check-input task-checkbox" type="checkbox" data-task-id="${task.id}" style="transform: scale(1.2);"></div>
-                                <div class="col">
+                                <div class="col-auto">
+                                    <input class="form-check-input task-checkbox" type="checkbox" data-task-id="${task.id}" style="transform: scale(1.2);">
+                                </div>
+                                <div class="col-3 col-lg-2 border-end pe-2">
+                                    <span class="badge bg-primary text-truncate d-inline-block mb-1" style="max-width: 100%;" title="${task.account_alias}">${task.account_alias}</span>
+                                    <div><code style="word-break: break-all;" title="${taskName}">${taskName}</code></div>
+                                </div>
+                                <div class="col ps-3">
                                     <div class="d-flex justify-content-between align-items-start">
-                                        <div><strong><span class="badge bg-primary me-2">${task.account_alias}</span><code>${taskName}</code></strong><p class="mb-1 small text-muted">开始于: ${new Date(start_time).toLocaleString()}</p></div>
+                                        <div><p class="mb-1 small text-muted">开始于: ${new Date(start_time).toLocaleString()}</p></div>
                                         <div class="text-end">${statusBadge}</div>
                                     </div>
                                     <div class="oci-task-config p-2 rounded small mt-1">${configString}<br><strong>可用域:</strong> <code>${details.ad || '未知'}</code><br><strong>执行时长:</strong> ${formatElapsedTime(start_time)}</div>
@@ -1648,26 +1655,45 @@ document.addEventListener('DOMContentLoaded', function() {
                             </div>
                         </li>`;
                     }
-                    return `<li class="list-group-item" data-task-id="${task.id}" data-task-status="${task.status}"><div class="d-flex w-100 align-items-center"><input class="form-check-input task-checkbox" type="checkbox" data-task-id="${task.id}"><div class="ms-3 flex-grow-1"><strong><span class="badge bg-primary me-2">${task.account_alias}</span>${task.name}</strong><br><small class="text-muted">${String(task.result)}</small></div></div></li>`;
+                    return `
+                    <li class="list-group-item py-2" data-task-id="${task.id}" data-task-status="${task.status}">
+                        <div class="row align-items-center">
+                            <div class="col-auto">
+                                <input class="form-check-input task-checkbox" type="checkbox" data-task-id="${task.id}" style="transform: scale(1.2);">
+                            </div>
+                            <div class="col-3 col-lg-2 border-end pe-2">
+                                <span class="badge bg-primary text-truncate d-inline-block mb-1" style="max-width: 100%;" title="${task.account_alias}">${task.account_alias}</span>
+                                <div><strong class="small" style="word-break: break-all;">${task.name}</strong></div>
+                            </div>
+                            <div class="col ps-3"><small class="text-muted">${String(task.result)}</small></div>
+                        </div>
+                    </li>`;
                 }).join('');
 
-            updateStatCards({ runningCount: running.length, completedCount: completed.length });
+            // 渲染已完成的任务
             completedSnatchTasksList.innerHTML = completed.length === 0
-                ? '<li class="list-group-item text-muted text-center py-4"><div class="mb-2"><i class="bi bi-archive fs-4"></i></div>没有已完成的抢占任务记录。</li>'
+                ? '<li class="list-group-item text-muted">没有已完成的抢占任务记录。</li>'
                 : completed.map(task => {
-                    const startTime = task.created_at;
+                    const startTime = task.created_at; 
                     const durationText = formatDuration(startTime, task.completed_at || task.created_at);
                     const timeInfo = `
                         <small class="text-muted d-block">完成于: ${new Date(task.completed_at || task.created_at).toLocaleString()}</small>
                         <small class="text-muted d-block">总用时: ${durationText}</small>
                     `;
 
+                    // 👇 修复点：移除了 class 里的 list-group-item-action
                     return `
-                    <li class="list-group-item list-group-item-action" data-task-id="${task.id}">
-                        <div class="d-flex w-100 align-items-center">
-                            <input class="form-check-input task-checkbox" type="checkbox" data-task-id="${task.id}">
-                            <div class="ms-3 flex-grow-1 d-flex justify-content-between align-items-center">
-                                <div><strong><span class="badge bg-secondary me-2">${task.account_alias}</span>${task.name}</strong><br>${timeInfo}</div>
+                    <li class="list-group-item py-2" data-task-id="${task.id}">
+                        <div class="row align-items-center">
+                            <div class="col-auto">
+                                <input class="form-check-input task-checkbox" type="checkbox" data-task-id="${task.id}" style="transform: scale(1.2);">
+                            </div>
+                            <div class="col-3 col-lg-2 border-end pe-2">
+                                <span class="badge bg-secondary text-truncate d-inline-block mb-1" style="max-width: 100%;" title="${task.account_alias}">${task.account_alias}</span>
+                                <div><strong class="small" style="word-break: break-all;" title="${task.name}">${task.name}</strong></div>
+                            </div>
+                            <div class="col ps-3 d-flex justify-content-between align-items-center">
+                                <div>${timeInfo}</div>
                                 <span class="badge bg-${task.status === 'success' ? 'success' : 'danger'}">${task.status === 'success' ? '成功' : '失败'}</span>
                             </div>
                         </div>
