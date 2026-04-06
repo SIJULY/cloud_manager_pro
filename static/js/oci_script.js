@@ -1634,8 +1634,9 @@ document.addEventListener('DOMContentLoaded', function() {
                         
                         const configString = `<strong>配置:</strong> ${details.shape} / ${details.ocpus || 'N/A'} OCPU / ${details.memory_in_gbs || 'N/A'} GB / ${details.boot_volume_size || 'N/A'} GB<br><strong>系统:</strong> ${details.os_name_version}`;
 
+                        // 👇 修改点：删除了 <br><strong>可用域:</strong> <code>${details.ad || '未知'}</code>
                         return `
-                        <li class="list-group-item py-2" data-task-id="${task.id}" data-task-status="${task.status}">
+                        <li class="list-group-item py-3" style="border-bottom: 1px solid rgba(128, 128, 128, 0.25) !important;" data-task-id="${task.id}" data-task-status="${task.status}">
                             <div class="row align-items-center">
                                 <div class="col-auto">
                                     <input class="form-check-input task-checkbox" type="checkbox" data-task-id="${task.id}" style="transform: scale(1.2);">
@@ -1645,18 +1646,18 @@ document.addEventListener('DOMContentLoaded', function() {
                                     <div><code style="word-break: break-all;" title="${taskName}">${taskName}</code></div>
                                 </div>
                                 <div class="col ps-3">
-                                    <div class="d-flex justify-content-between align-items-start">
-                                        <div><p class="mb-1 small text-muted">开始于: ${new Date(start_time).toLocaleString()}</p></div>
-                                        <div class="text-end">${statusBadge}</div>
+                                    <div class="d-flex justify-content-between align-items-center mb-1">
+                                        <div class="small text-muted"><i class="bi bi-clock"></i> 开始于: ${new Date(start_time).toLocaleString()} <span class="mx-2">|</span> 执行时长: ${formatElapsedTime(start_time)}</div>
+                                        <div>${statusBadge}</div>
                                     </div>
-                                    <div class="oci-task-config p-2 rounded small mt-1">${configString}<br><strong>可用域:</strong> <code>${details.ad || '未知'}</code><br><strong>执行时长:</strong> ${formatElapsedTime(start_time)}</div>
+                                    <div class="oci-task-config p-2 rounded small">${configString}</div>
                                     <div class="mt-2">${progressBar}<p class="mb-0 mt-1 small text-info-emphasis"><strong>最新状态:</strong> ${last_message}</p></div>
                                 </div>
                             </div>
                         </li>`;
                     }
                     return `
-                    <li class="list-group-item py-2" data-task-id="${task.id}" data-task-status="${task.status}">
+                    <li class="list-group-item py-3" style="border-bottom: 1px solid rgba(128, 128, 128, 0.25) !important;" data-task-id="${task.id}" data-task-status="${task.status}">
                         <div class="row align-items-center">
                             <div class="col-auto">
                                 <input class="form-check-input task-checkbox" type="checkbox" data-task-id="${task.id}" style="transform: scale(1.2);">
@@ -1676,14 +1677,13 @@ document.addEventListener('DOMContentLoaded', function() {
                 : completed.map(task => {
                     const startTime = task.created_at; 
                     const durationText = formatDuration(startTime, task.completed_at || task.created_at);
+                    
                     const timeInfo = `
-                        <small class="text-muted d-block">完成于: ${new Date(task.completed_at || task.created_at).toLocaleString()}</small>
-                        <small class="text-muted d-block">总用时: ${durationText}</small>
+                        <div class="small text-muted"><i class="bi bi-calendar-check"></i> 完成于: ${new Date(task.completed_at || task.created_at).toLocaleString()} <span class="mx-2">|</span> 总用时: ${durationText}</div>
                     `;
 
-                    // 👇 修复点：移除了 class 里的 list-group-item-action
                     return `
-                    <li class="list-group-item py-2" data-task-id="${task.id}">
+                    <li class="list-group-item py-3" style="border-bottom: 1px solid rgba(128, 128, 128, 0.25) !important;" data-task-id="${task.id}">
                         <div class="row align-items-center">
                             <div class="col-auto">
                                 <input class="form-check-input task-checkbox" type="checkbox" data-task-id="${task.id}" style="transform: scale(1.2);">
@@ -1693,7 +1693,7 @@ document.addEventListener('DOMContentLoaded', function() {
                                 <div><strong class="small" style="word-break: break-all;" title="${task.name}">${task.name}</strong></div>
                             </div>
                             <div class="col ps-3 d-flex justify-content-between align-items-center">
-                                <div>${timeInfo}</div>
+                                ${timeInfo}
                                 <span class="badge bg-${task.status === 'success' ? 'success' : 'danger'}">${task.status === 'success' ? '成功' : '失败'}</span>
                             </div>
                         </div>
@@ -1704,7 +1704,7 @@ document.addEventListener('DOMContentLoaded', function() {
             completedSnatchTasksList.innerHTML = '<li class="list-group-item list-group-item-danger">加载已完成任务失败。</li>';
         }
     }
-
+    
     completedSnatchTasksList.addEventListener('dblclick', async e => {
         const listItem = e.target.closest('li.list-group-item[data-task-id]');
         if (!listItem) return;
