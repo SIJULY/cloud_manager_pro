@@ -2430,6 +2430,210 @@ document.addEventListener('DOMContentLoaded', function() {
     window.pollTaskStatus = pollTaskStatus;
     window.loadSnatchTasks = loadSnatchTasks;
 
+
+    // ==========================================
+    // ✨✨✨ 新增：IAM 身份与用户管理逻辑 ✨✨✨
+    // ==========================================
+    const manageUsersBtn = document.getElementById('manageUsersBtn');
+    const userManagementModalEl = document.getElementById('userManagementModal');
+    const iamUsersList = document.getElementById('iamUsersList');
+    const refreshUsersBtn = document.getElementById('refreshUsersBtn');
+    
+    // UI 控制
+    const showCreateUserBtn = document.getElementById('showCreateUserBtn');
+    const createUserFormArea = document.getElementById('createUserFormArea');
+    const submitCreateUserBtn = document.getElementById('submitCreateUserBtn');
+
+    // 1. 登录会话联动按钮状态
+    // 在原本的 enableMainControls 函数中其实不用改，因为我们用的是 disabled 属性，
+    // 我们在这里监听连接成功后手动激活它
+    const originalEnableMainControls = enableMainControls;
+    enableMainControls = function(enabled, canCreate) {
+        originalEnableMainControls(enabled, canCreate);
+        if (manageUsersBtn) manageUsersBtn.disabled = !enabled;
+    };
+
+    // 2. 加载用户列表
+    async function loadIamUsers() {
+        if (!iamUsersList) return;
+        iamUsersList.innerHTML = '<tr><td colspan="4" class="text-center text-muted py-5"><div class="spinner-border spinner-border-sm"></div> 正在请求甲骨文 API 获取用户列表...</td></tr>';
+        
+        try {
+            const users = await apiRequest('/oci/api/identity/users');
+            iamUsersList.innerHTML = '';
+            
+            if (users.length === 0) {
+                iamUsersList.innerHTML = '<tr><td colspan="4" class="text-center text-muted py-4">未找到任何用户</td></tr>';
+                return;
+            }
+            
+            users.forEach(user => {
+                const tr = document.createElement('tr');
+                const statusColor = user.lifecycle_state === 'ACTIVE' ? 'success' : 'secondary';
+                
+                // 👇 隐藏“无”或者默认的描述，让界面更清爽
+                let descHtml = '';
+                if (user.description && user.description !== '无' && user.description !== 'Created via Web Panel') {
+                    descHtml = `<br><small class="text-muted" style="font-size: 0.75rem;">${user.description}</small>`;
+                }
+                
+                let emailHtml = user.email === '未绑定' 
+                    ? `<span class="text-muted small">未绑定</span>` 
+                    : `<code class="text-info">${user.email}</code>`;
+                
+                tr.innerHTML = `
+                    <td style="padding-left: 1rem;"><strong class="text-light">${user.name}</strong>${descHtml}</td>
+                    <td>${emailHtml}</td>
+                    <td class="text-center"><span class="badge bg-${statusColor}">${user.lifecycle_state}</span></td>
+                    <td class="text-center">
+                        <div class="btn-group btn-group-sm">
+                            <button class="btn btn-outline-warning action-reset-pwd" data-id="${user.id}" data-name="${user.name}" title="重置登录密码"><i class="bi bi-key"></i> 重置</button>
+                            <button class="btn btn-outline-danger action-clear-2fa" data-id="${user.id}" data-name="${user.name}" title="强制解除所有 2FA 绑定"><i class="bi bi-phone-vibrate"></i> 清 2FA</button>
+                            <button class="btn btn-outline-info action-edit-email" data-id="${user.id}" data-name="${user.name}" data-email="${user.email}" title="修改绑定的邮箱"><i class="bi bi-envelope"></i> 邮箱</button>
+                        </div>
+                    </td>
+                `;
+                iamUsersList.appendChild(tr);
+            });
+            
+            bindUserActionEvents();
+        } catch (error) {
+            iamUsersList.innerHTML = `<tr><td colspan="4" class="text-center text-danger py-4">加载失败: ${error.message}</td></tr>`;
+        }
+    }
+
+    // 3. 绑定操作按钮事件
+    function bindUserActionEvents() {
+        // 重置密码
+        document.querySelectorAll('.action-reset-pwd').forEach(btn => {
+            btn.onclick = async () => {
+                const name = btn.dataset.name;
+                const id = btn.dataset.id;
+                if (!confirm(`⚠️ 危险操作！\n\n确定要重置用户 [${name}] 的控制台登录密码吗？\n重置后将生成一个只能使用一次的临时密码，旧密码将立即失效！`)) return;
+                
+                btn.disabled = true;
+                btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>...';
+                try {
+                    const res = await apiRequest(`/oci/api/identity/users/${id}/reset-password`, { method: 'POST' });
+                    alert(`✅ 密码重置成功！\n\n用户: ${name}\n一次性临时密码: ${res.new_password}\n\n请立即复制保存此密码，关闭后将无法再次查看！`);
+                    addLog(`用户 ${name} 的密码已重置。`, 'success');
+                } catch (e) {
+                    alert(`❌ 重置失败: ${e.message}`);
+                } finally {
+                    btn.disabled = false;
+                    btn.innerHTML = '<i class="bi bi-key"></i> 重置密码';
+                }
+            };
+        });
+
+        // 清除 2FA
+        document.querySelectorAll('.action-clear-2fa').forEach(btn => {
+            btn.onclick = async () => {
+                const name = btn.dataset.name;
+                const id = btn.dataset.id;
+                if (!confirm(`🚨 确定要强制清除用户 [${name}] 绑定的所有 2FA (两步验证) 设备吗？\n清除后该用户登录时将不再需要输入验证码！`)) return;
+                
+                btn.disabled = true;
+                btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>...';
+                try {
+                    const res = await apiRequest(`/oci/api/identity/users/${id}/clear-2fa`, { method: 'POST' });
+                    alert(`✅ ${res.message}`);
+                    addLog(`已清除用户 ${name} 的 2FA 设备。`, 'success');
+                } catch (e) {
+                    alert(`❌ 清除失败: ${e.message}`);
+                } finally {
+                    btn.disabled = false;
+                    btn.innerHTML = '<i class="bi bi-phone-vibrate"></i> 清除 2FA';
+                }
+            };
+        });
+
+        // 改邮箱
+        document.querySelectorAll('.action-edit-email').forEach(btn => {
+            btn.onclick = async () => {
+                const name = btn.dataset.name;
+                const id = btn.dataset.id;
+                const oldEmail = btn.dataset.email;
+                const newEmail = prompt(`请输入用户 [${name}] 的新绑定邮箱：`, oldEmail !== '未绑定' ? oldEmail : '');
+                
+                if (newEmail === null || newEmail.trim() === '' || newEmail === oldEmail) return;
+                
+                btn.disabled = true;
+                btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>...';
+                try {
+                    const res = await apiRequest(`/oci/api/identity/users/${id}/update-email`, { 
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ email: newEmail.trim() })
+                    });
+                    addLog(`用户 ${name} 的邮箱已更新。`, 'success');
+                    loadIamUsers(); // 刷新列表
+                } catch (e) {
+                    alert(`❌ 更新邮箱失败: ${e.message}`);
+                } finally {
+                    btn.disabled = false;
+                    btn.innerHTML = '<i class="bi bi-envelope"></i> 改邮箱';
+                }
+            };
+        });
+    }
+
+    // 4. 监听弹窗与刷新
+    if (userManagementModalEl) {
+        userManagementModalEl.addEventListener('shown.bs.modal', loadIamUsers);
+    }
+    if (refreshUsersBtn) {
+        refreshUsersBtn.addEventListener('click', loadIamUsers);
+    }
+
+    // 5. 创建用户表单交互
+    if (showCreateUserBtn) {
+        showCreateUserBtn.addEventListener('click', () => {
+            createUserFormArea.classList.toggle('d-none');
+        });
+    }
+    
+    if (submitCreateUserBtn) {
+        submitCreateUserBtn.addEventListener('click', async () => {
+            const nameInput = document.getElementById('newUserName');
+            const emailInput = document.getElementById('newUserEmail');
+            const descInput = document.getElementById('newUserDesc');
+            
+            if (!nameInput.value.trim()) {
+                alert("用户名不能为空！");
+                return;
+            }
+            
+            submitCreateUserBtn.disabled = true;
+            submitCreateUserBtn.innerHTML = '创建中...';
+            
+            try {
+                const res = await apiRequest('/oci/api/identity/users', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        name: nameInput.value.trim(),
+                        email: emailInput.value.trim(),
+                        description: descInput.value.trim()
+                    })
+                });
+                alert(`✅ ${res.message}\n\n注意：新用户创建后初始没有密码，请在列表中点击【重置密码】为其生成初始密码！`);
+                nameInput.value = '';
+                emailInput.value = '';
+                createUserFormArea.classList.add('d-none');
+                loadIamUsers();
+            } catch (e) {
+                alert(`❌ 创建失败: ${e.message}`);
+            } finally {
+                submitCreateUserBtn.disabled = false;
+                submitCreateUserBtn.innerHTML = '确认创建';
+            }
+        });
+    }
+    // ==========================================
+
+    
+
     async function initializeOciDashboard() {
         try {
             await loadProfiles();
