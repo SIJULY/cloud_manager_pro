@@ -424,6 +424,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
                 if (response.task_ids && Array.isArray(response.task_ids)) {
                     response.task_ids.forEach(pollTaskStatus);
+                    // 提交任务后调用后台静默拉取
                     loadSnatchTasks();
                 }
             } catch (error) {
@@ -570,15 +571,13 @@ document.addEventListener('DOMContentLoaded', function() {
             if (shapes.length === 0) {
                 shapeSelect.innerHTML = '<option value="">当前系统无可用规格</option>';
             } else {
-                // 智能排序：把免费的 ARM (权重2) 和 AMD (权重1) 永远排在下拉框最前面
                 shapes.sort((a, b) => {
                     const weightA = a.includes('A1.Flex') ? 2 : (a.includes('E2.1.Micro') ? 1 : 0);
                     const weightB = b.includes('A1.Flex') ? 2 : (b.includes('E2.1.Micro') ? 1 : 0);
-                    if (weightA !== weightB) return weightB - weightA; // 按权重降序
-                    return a.localeCompare(b); // 权重一样就按字母排
+                    if (weightA !== weightB) return weightB - weightA;
+                    return a.localeCompare(b);
                 });
 
-                // 去重逻辑
                 const seenShapes = new Set();
                 shapes.forEach(shape => {
                     if (!seenShapes.has(shape)) {
@@ -586,7 +585,6 @@ document.addEventListener('DOMContentLoaded', function() {
                         const option = document.createElement('option');
                         option.value = shape;
                         
-                        // ✨ 增加醒目的免费标注 ✨
                         if (shape === 'VM.Standard.A1.Flex') {
                             option.textContent = '🌟 VM.Standard.A1.Flex (ARM 免费)';
                         } else if (shape === 'VM.Standard.E2.1.Micro') {
@@ -609,6 +607,7 @@ document.addEventListener('DOMContentLoaded', function() {
             shapeSelect.dispatchEvent(new Event('change'));
         }
     }
+
     function addLog(message, type = 'info') {
         const timestamp = new Date().toLocaleTimeString();
         const typeMap = { 'error': 'text-danger', 'success': 'text-success', 'warning': 'text-warning' };
@@ -650,16 +649,44 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-    async function refreshInstances() {
-        addLog('正在刷新实例列表...');
-        refreshInstancesBtn.disabled = true;
-        instanceList.innerHTML = `<tr><td colspan="6" class="text-center text-muted py-5"><div class="spinner-border spinner-border-sm"></div> 正在加载...</td></tr>`;
+    // 独立控制操作按钮的状态
+    function updateActionButtonsState() {
+        if (!selectedInstance) {
+            Object.values(instanceActionButtons).forEach(btn => btn.disabled = true);
+            return;
+        }
+        const state = selectedInstance.lifecycle_state;
+        const isTerminated = ['TERMINATED', 'TERMINATING'].includes(state);
+        Object.values(instanceActionButtons).forEach(btn => btn.disabled = isTerminated);
+        instanceActionButtons.start.disabled = state !== 'STOPPED';
+        instanceActionButtons.stop.disabled = state !== 'RUNNING';
+        instanceActionButtons.restart.disabled = state !== 'RUNNING';
+        instanceActionButtons.changeIp.disabled = state !== 'RUNNING';
+        instanceActionButtons.addIp.disabled = state !== 'RUNNING';
+        instanceActionButtons.assignIpv6.disabled = !(state === 'RUNNING' && selectedInstance.vnic_id);
+    }
+
+    // ⭐ 修复点：支持静默刷新，不再粗暴覆盖 innerHTML 导致白屏闪烁 ⭐
+    async function refreshInstances(isSilent = false) {
+        const originalBtnHtml = refreshInstancesBtn.innerHTML;
+        
+        if (!isSilent) {
+            addLog('正在刷新实例列表...');
+            refreshInstancesBtn.disabled = true;
+            refreshInstancesBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> 刷新中...';
+        }
+
         try {
             const instances = await apiRequest('/oci/api/instances');
             currentInstances = instances;
+            
+            // 记住当前选中的行 ID
+            const selectedId = selectedInstance ? selectedInstance.id : null;
+            
             instanceList.innerHTML = '';
             if (instances.length === 0) {
                 instanceList.innerHTML = `<tr><td colspan="6" class="text-center text-muted py-5">未找到任何实例</td></tr>`;
+                selectedInstance = null;
             } else {
                 instances.forEach(inst => {
                     const tr = document.createElement('tr');
@@ -674,19 +701,35 @@ document.addEventListener('DOMContentLoaded', function() {
                         <td class="text-center align-middle">${inst.ipv6_address || '无'}</td>
                         <td class="text-center align-middle">${inst.ocpus}c / ${inst.memory_in_gbs}g / ${inst.boot_volume_size_gb}</td>
                         <td class="text-center align-middle">${new Date(inst.time_created).toLocaleString()}</td>`;
+                    
+                    // 恢复选中状态
+                    if (inst.id === selectedId) {
+                        tr.classList.add('table-active');
+                        selectedInstance = inst;
+                    }
                     instanceList.appendChild(tr);
                 });
             }
-            addLog('实例列表刷新成功!', 'success');
+            
+            updateActionButtonsState();
+            
+            if (!isSilent) addLog('实例列表刷新成功!', 'success');
         } catch (error) {
             currentInstances = [];
-            instanceList.innerHTML = `<tr><td colspan="6" class="text-center text-danger py-5">加载实例列表失败</td></tr>`;
+            if (instanceList.children.length === 0 || !isSilent) {
+                instanceList.innerHTML = `<tr><td colspan="6" class="text-center text-danger py-5">加载实例列表失败</td></tr>`;
+            }
+            selectedInstance = null;
+            updateActionButtonsState();
         } finally {
-            refreshInstancesBtn.disabled = false;
+            if (!isSilent) {
+                refreshInstancesBtn.disabled = false;
+                refreshInstancesBtn.innerHTML = originalBtnHtml;
+            }
         }
     }
 
-    refreshInstancesBtn.addEventListener('click', refreshInstances);
+    refreshInstancesBtn.addEventListener('click', () => refreshInstances(false));
 
     function updateStatCards({ profileCount = null, currentAlias = null, runningCount = null, completedCount = null, cloudflareConfigured = null, tgConfigured = null, defaultKeyConfigured = null } = {}) {
         if (profilesStatValue) {
@@ -842,7 +885,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 await refreshDashboardSummaries(data.alias);
 
                 if (shouldRefreshInstances) {
-                    await refreshInstances();
+                    await refreshInstances(true); // 初次加载可以静默
                 }
 
                 const activeRow = document.querySelector(`#profileList tr[data-alias="${data.alias}"]`);
@@ -928,7 +971,8 @@ document.addEventListener('DOMContentLoaded', function() {
                     delete window[lastSnatchLogKey];
 
                     if (apiResponse.status === 'success') {
-                        setTimeout(refreshInstances, 2000);
+                        // 静默无感刷新表格
+                        setTimeout(() => refreshInstances(true), 2000);
                     }
                 }
 
@@ -1004,9 +1048,8 @@ document.addEventListener('DOMContentLoaded', function() {
             delete snatchTaskAnnounced[taskId];
 
             setTimeout(() => {
-                if (document.getElementById('viewSnatchTasksModal').classList.contains('show')) {
-                    loadSnatchTasks();
-                }
+                // ⭐ 修复点：无论任务窗口是否打开，都强制静默刷新后台数据以更新主面板的数字 ⭐
+                loadSnatchTasks();
             }, 3000);
         } else {
             addLog(`任务 [${taskNameForLog}] 状态: ${apiResponse.status} - ${apiResponse.result}`);
@@ -1014,13 +1057,13 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     async function loadProfiles() {
-        profileList.innerHTML = `<tr><td colspan="6" class="text-center text-muted">正在加载...</td></tr>`;
+        // ⭐ 移除这里的“正在加载”以实现切换页面时的静默无感更新
         try {
             const profiles = await apiRequest(`/oci/api/profiles`);
-            profileList.innerHTML = '';
 
             if (profiles.length === 0) {
                 profileList.innerHTML = `<tr><td colspan="6" class="text-center text-muted py-5"><div class="mb-2"><i class="bi bi-person-x fs-3"></i></div><div>未找到账号，请点击右上角添加</div></td></tr>`;
+                updateStatCards({ profileCount: 0 });
                 return;
             }
 
@@ -1041,6 +1084,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 });
             }
 
+            profileList.innerHTML = '';
             profiles.forEach(p => {
                 const tr = document.createElement('tr');
                 tr.dataset.alias = p.alias;
@@ -1579,29 +1623,16 @@ document.addEventListener('DOMContentLoaded', function() {
         row.classList.add('table-active');
         selectedInstance = JSON.parse(row.dataset.instanceData);
 
-        const state = selectedInstance.lifecycle_state;
-        const isTerminated = ['TERMINATED', 'TERMINATING'].includes(state);
-        Object.values(instanceActionButtons).forEach(btn => btn.disabled = isTerminated);
-        instanceActionButtons.start.disabled = state !== 'STOPPED';
-        instanceActionButtons.stop.disabled = state !== 'RUNNING';
-        instanceActionButtons.restart.disabled = state !== 'RUNNING';
-        instanceActionButtons.changeIp.disabled = state !== 'RUNNING';
-        instanceActionButtons.addIp.disabled = state !== 'RUNNING';
-        instanceActionButtons.assignIpv6.disabled = !(state === 'RUNNING' && selectedInstance.vnic_id);
+        // 提取为了独立函数，以支持更新 DOM 后重新计算状态
+        updateActionButtonsState();
     });
 
     async function loadSnatchTasks() {
-        runningSnatchTasksList.innerHTML = '<li class="list-group-item">正在加载...</li>';
-        completedSnatchTasksList.innerHTML = '<li class="list-group-item">正在加载...</li>';
-        
         stopSnatchTaskBtn.disabled = true;
         resumeSnatchTaskBtn.disabled = true;
         deleteSnatchTaskBtn.disabled = true;
         deleteCompletedBtn.disabled = true;
 
-        document.getElementById('selectAllRunningTasks').checked = false;
-        document.getElementById('selectAllCompletedTasks').checked = false;
-        
         try {
             const [running, completed] = await Promise.all([
                 apiRequest('/oci/api/tasks/snatching/running'),
@@ -1617,7 +1648,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 });
             }
 
-            // 渲染正在运行的任务
+            // ⭐ 修复点：这里是更新后台主面板 5 Running / 2 Done 卡片的核心代码 ⭐
+            updateStatCards({ runningCount: running.length, completedCount: completed.length });
+
+            // 渲染正在运行的任务 (直接重绘 DOM，不再清空出现闪烁)
             runningSnatchTasksList.innerHTML = running.length === 0
                 ? '<li class="list-group-item text-muted">没有正在运行或已暂停的任务。</li>'
                 : running.map(task => {
@@ -1634,7 +1668,6 @@ document.addEventListener('DOMContentLoaded', function() {
                         
                         const configString = `<strong>配置:</strong> ${details.shape} / ${details.ocpus || 'N/A'} OCPU / ${details.memory_in_gbs || 'N/A'} GB / ${details.boot_volume_size || 'N/A'} GB<br><strong>系统:</strong> ${details.os_name_version}`;
 
-                        // 👇 修改点：删除了 <br><strong>可用域:</strong> <code>${details.ad || '未知'}</code>
                         return `
                         <li class="list-group-item py-3" style="border-bottom: 1px solid rgba(128, 128, 128, 0.25) !important;" data-task-id="${task.id}" data-task-status="${task.status}">
                             <div class="row align-items-center">
@@ -1699,6 +1732,9 @@ document.addEventListener('DOMContentLoaded', function() {
                         </div>
                     </li>`
                 }).join('');
+                
+            updateRunningActionButtons();
+            updateCompletedActionButtons();
         } catch (e) {
             runningSnatchTasksList.innerHTML = '<li class="list-group-item list-group-item-danger">加载正在运行任务失败。</li>';
             completedSnatchTasksList.innerHTML = '<li class="list-group-item list-group-item-danger">加载已完成任务失败。</li>';
@@ -1836,7 +1872,9 @@ document.addEventListener('DOMContentLoaded', function() {
                     addLog(`IP 附加成功! 新公网IP: ${response.public_ip}`, 'success');
                     alert(`✅ IP 附加成功！\n\n公网 IP: ${response.public_ip}\n内网 IP: ${response.private_ip}\n\n⚠️ 请务必登录 VPS 执行以下命令以启用新 IP:\n\n${response.cmd_hint}`);
                     addLog(`📋 请在 VPS 执行: ${response.cmd_hint}`, 'info');
-                    setTimeout(refreshInstances, 2000);
+                    
+                    // 使用无感静默刷新
+                    setTimeout(() => refreshInstances(true), 2000);
                 } catch (e) {}
                 return;
             }
@@ -1872,7 +1910,9 @@ document.addEventListener('DOMContentLoaded', function() {
             });
             addLog(response.message, 'success');
             editInstanceModal.hide();
-            setTimeout(refreshInstances, 1500);
+            
+            // 使用无感静默刷新
+            setTimeout(() => refreshInstances(true), 1500);
         } catch (error) { }
     }
 
@@ -1889,7 +1929,9 @@ document.addEventListener('DOMContentLoaded', function() {
             });
             addLog(response.message, 'success');
             editInstanceModal.hide();
-            setTimeout(refreshInstances, 1500);
+            
+            // 使用无感静默刷新
+            setTimeout(() => refreshInstances(true), 1500);
         } catch (error) { }
     }
 
@@ -2023,7 +2065,9 @@ document.addEventListener('DOMContentLoaded', function() {
             addLog(response.message, 'success');
             if (response.task_id) pollTaskStatus(response.task_id);
             editInstanceModal.hide();
-            setTimeout(refreshInstances, 3000);
+            
+            // 使用无感静默刷新
+            setTimeout(() => refreshInstances(true), 3000);
         } catch(e) {}
     }
 
