@@ -109,11 +109,22 @@
                 <div id="connectedProfileEmptyState" class="oci-empty-state text-center py-5"><div class="mb-2"><i class="bi bi-person-bounding-box fs-2"></i></div><strong>尚未连接 OCI 账号</strong><div class="small mt-2">请先在“OCI Profiles”弹出窗口中选择并连接一个账号，然后在此查看只读详情。</div></div>
                 <div id="connectedProfileDetails" class="d-none">
                     
-                    <div class="connected-profile-summary mb-3">
+                    <div class="connected-profile-summary-3 mb-3">
                         <div class="connected-profile-item">
                             <div class="connected-profile-item-label">账户名称</div>
                             <div id="connectedProfileAlias" class="connected-profile-item-value compact" title="-">-</div>
                         </div>
+                        <div class="connected-profile-item">
+                            <div class="connected-profile-item-label">区域</div>
+                            <div id="connectedProfileRegion" class="connected-profile-item-value compact" title="-">-</div>
+                        </div>
+                        <div class="connected-profile-item">
+                            <div class="connected-profile-item-label">代理</div>
+                            <div id="connectedProfileProxy" class="connected-profile-item-value compact" title="-">-</div>
+                        </div>
+                    </div>
+
+                    <div class="connected-profile-summary-3">
                         <div class="connected-profile-item">
                             <div class="connected-profile-item-label">租户名 / 租户 ID</div>
                             <div id="connectedProfileTenancy" class="connected-profile-item-value compact" title="-">-</div>
@@ -123,23 +134,8 @@
                             <div id="connectedProfileUser" class="connected-profile-item-value compact" title="-">-</div>
                         </div>
                         <div class="connected-profile-item">
-                            <div class="connected-profile-item-label">区域</div>
-                            <div id="connectedProfileRegion" class="connected-profile-item-value compact" title="-">-</div>
-                        </div>
-                    </div>
-
-                    <div class="connected-profile-summary-3">
-                        <div class="connected-profile-item">
                             <div class="connected-profile-item-label">租户创建时间</div>
                             <div id="connectedProfileRegDate" class="connected-profile-item-value compact" title="-">-</div>
-                        </div>
-                        <div class="connected-profile-item">
-                            <div class="connected-profile-item-label">代理</div>
-                            <div id="connectedProfileProxy" class="connected-profile-item-value compact" title="-">-</div>
-                        </div>
-                        <div class="connected-profile-item">
-                            <div class="connected-profile-item-label">默认 SSH 公钥</div>
-                            <div id="connectedProfileSsh" class="connected-profile-item-value">-</div>
                         </div>
                     </div>
 
@@ -147,6 +143,7 @@
                         <div id="connectedProfileMeta"></div>
                         <div id="connectedProfileStatusBadge"></div>
                         <div id="connectedProfileFingerprint"></div>
+                        <div id="connectedProfileSsh"></div>
                     </div>
                 </div>
             </div>
@@ -338,6 +335,9 @@
                     </button>
                     <button type="button" id="tgSettingsBtn" class="btn btn-outline-info text-start py-3 oci-hub-button">
                         <i class="bi bi-telegram me-2"></i>TG & API 设置
+                    <button type="button" id="globalSshKeyHubBtn" class="btn btn-outline-info text-start py-3 oci-hub-button">
+                        <i class="bi bi-key-fill me-2"></i>默认 SSH 公钥设置
+                    </button>
                     </button>
                 </div>
             </div>
@@ -372,15 +372,9 @@
                 </div>
                 
                 <div class="p-3 mt-4 oci-soft-panel">
-                    <h6 class="mb-2">全局默认SSH公钥管理</h6>
-                    <div id="defaultSshKeyStatusText" class="form-text mb-2" style="height: 1.2rem;">
-                        </div>
-                    <div class="input-group">
-                        <input class="form-control" type="file" id="globalSshKeyFile" accept=".pub" placeholder="选择一个新的 .pub 公钥文件">
-                        <button class="btn btn-outline-info" type="button" id="saveGlobalSshKeyBtn">
-                            <i class="bi bi-save"></i> <span id="saveGlobalSshKeyBtnText">更新/保存</span>
-                        </button>
-                    </div>
+                    <h6 class="mb-2">全局默认SSH公钥状态</h6>
+                    <div id="defaultSshKeyStatusText" class="form-text mb-2" style="height: 1.2rem;"></div>
+                    <div class="form-text text-muted"><i class="bi bi-info-circle"></i> 如需修改全局公钥，请在主界面的【网络与配置】菜单中进行设置。</div>
                 </div>
                 </div>
             <div class="modal-footer">
@@ -969,6 +963,39 @@
         </div>
     </div>
 </div>
+
+<div class="modal fade" id="globalSshKeyModal" tabindex="-1" aria-labelledby="globalSshKeyModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div>
+                    <h5 class="modal-title" id="globalSshKeyModalLabel">默认 SSH 公钥设置</h5>
+                    <div class="oci-modal-lead">配置后，新创建的账户如果没有上传专用的公钥，将默认使用此公钥。</div>
+                </div>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label for="globalSshKeyInput" class="form-label fw-bold">1. 手动输入公钥</label>
+                    <textarea class="form-control oci-log" id="globalSshKeyInput" rows="6" placeholder="在此手动粘贴以 ssh-rsa / ecdsa-sha2-nistp256 / ssh-ed25519 等开头的公钥内容..."></textarea>
+                </div>
+                <div class="mb-3">
+                    <label for="globalSshKeyFileInput" class="form-label fw-bold">2. 或从本地文件读取</label>
+                    <input class="form-control" type="file" id="globalSshKeyFileInput" accept=".pub">
+                    <div class="form-text text-info mt-1"><i class="bi bi-magic"></i> 选择 .pub 文件后，系统会自动读取内容并填充到上方的输入框中。</div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                <button type="button" class="btn btn-primary px-4" id="submitGlobalSshKeyBtn">
+                    <span class="spinner-border spinner-border-sm d-none" role="status" aria-hidden="true"></span>
+                    保存公钥
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
 {% endblock %}
 
 {% block scripts %}
