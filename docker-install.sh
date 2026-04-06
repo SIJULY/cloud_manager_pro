@@ -7,6 +7,7 @@
 # --- 配置 ---
 INSTALL_DIR="/opt/cloud_manager"
 REPO_URL="https://github.com/SIJULY/cloud_manager_pro.git"
+SCRIPT_URL="https://raw.githubusercontent.com/SIJULY/cloud_manager_pro/main/install.sh"
 ENV_FILE="$INSTALL_DIR/.env"
 
 # --- 辅助函数 ---
@@ -83,7 +84,7 @@ prepare_environment() {
         # 尝试安装 Docker
         curl -fsSL https://get.docker.com | bash
         
-        # --- [新增] 校验安装结果 ---
+        # --- 校验安装结果 ---
         if ! command -v docker &> /dev/null; then
             echo "----------------------------------------------------"
             print_error "Docker 安装失败！\n可能原因：系统后台正在进行更新(apt被占用)。\n解决方法：\n1. 请等待几分钟后重试。\n2. 或者运行 'rm /var/lib/apt/lists/lock' 强制解锁(需谨慎)。\n3. 手动运行 'apt install docker.io' 查看具体错误。"
@@ -98,8 +99,8 @@ prepare_environment() {
     fi
     cd ${INSTALL_DIR}
     
-    # 初始化文件
-    touch azure_keys.json oci_profiles.json tg_settings.json key.txt azure_tasks.db oci_tasks.db
+    # 初始化文件 (这些文件不会被 git 覆盖)
+    touch azure_keys.json oci_profiles.json tg_settings.json key.txt azure_tasks.db oci_tasks.db cloudflare_settings.json xui_settings.json default_key.json
     chmod -R 777 .
 
     # 清理旧版逻辑
@@ -131,7 +132,7 @@ install_ip_mode() {
     print_info "正在启动..."
     docker compose down --remove-orphans
     
-    # --- [新增] 启动结果校验 ---
+    # --- 启动结果校验 ---
     if docker compose up -d --build; then
         SERVER_IP=$(curl -s ifconfig.me)
         print_success "安装完成！访问地址: http://${SERVER_IP}:${host_port}"
@@ -162,7 +163,7 @@ install_domain_mode() {
     print_info "正在启动..."
     docker compose down --remove-orphans
     
-    # --- [新增] 启动结果校验 ---
+    # --- 启动结果校验 ---
     if docker compose up -d --build; then
          print_success "安装完成！访问地址: https://${domain_name}"
     else
@@ -175,9 +176,24 @@ update_panel() {
     if [ ! -d "${INSTALL_DIR}" ]; then
         print_error "未找到安装目录，请先安装。"
     fi
+
+    # ==============================================================
+    # ✨ 核心修改：同步拉取最新版的安装脚本自身，覆盖当前运行的文件 ✨
+    # ==============================================================
+    print_info "正在同步获取最新版安装脚本..."
+    if curl -sSL "$SCRIPT_URL" -o "$0"; then
+        chmod +x "$0"
+        print_success "本安装脚本已成功更新至最新版！"
+    else
+        print_warning "脚本自更新失败，请检查网络 (将继续尝试更新面板)。"
+    fi
+
     cd "${INSTALL_DIR}"
 
-    print_info "正在拉取最新代码..."
+    # ==============================================================
+    # ✨ 核心机制：只拉取代码，自动保留 .db / .json / .env 等数据文件 ✨
+    # ==============================================================
+    print_info "正在拉取最新面板代码 (安全模式：自动保留数据库与用户配置)..."
     git fetch --all
     git reset --hard origin/main
     git pull
@@ -210,7 +226,7 @@ update_panel() {
     print_info "正在重建容器..."
     docker compose down --remove-orphans
     if docker compose up -d --build; then
-        print_success "更新完成！配置已保留。"
+        print_success "更新完成！系统已恢复运行，您的数据已全部保留。"
     else
         print_error "更新失败。"
     fi
@@ -238,7 +254,7 @@ print_info "Cloud Manager 管理脚本 (智能修复版)"
 echo "=========================================================="
 echo "  1) 安装: IP+端口模式 (适合已有 Nginx 或直接访问)"
 echo "  2) 安装: 域名+Caddy模式 (自动 HTTPS，占用 80/443)"
-echo "  3) 更新: 升级面板 (自动识别原有模式，不覆盖配置)"
+echo "  3) 更新: 升级面板容器与代码 (自动同步更新本脚本)"
 echo "  4) 卸载: 删除所有文件和容器"
 echo "  5) 退出"
 echo "=========================================================="
