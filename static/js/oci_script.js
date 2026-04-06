@@ -31,6 +31,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const addAccountModal = new bootstrap.Modal(document.getElementById('addAccountModal'));
     const profilesHubModalEl = document.getElementById('profilesHubModal');
 
+    // 刷新添加账户窗口中的全局公钥状态文字
     async function loadAndDisplayDefaultKey() {
         const statusText = document.getElementById('defaultSshKeyStatusText');
         if (!statusText) return;
@@ -46,43 +47,88 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-    const saveGlobalSshKeyBtn = document.getElementById('saveGlobalSshKeyBtn');
-    if (saveGlobalSshKeyBtn) {
-        saveGlobalSshKeyBtn.addEventListener('click', async () => {
-            const fileInput = document.getElementById('globalSshKeyFile');
-            const file = fileInput.files[0];
-            if (!file) return addLog('请先选择一个 .pub 公钥文件', 'warning');
+    // --- 全局默认 SSH 公钥设置逻辑 (从网络与配置 Hub 打开) ---
+    const globalSshKeyModalEl = document.getElementById('globalSshKeyModal');
+    let globalSshKeyModal = null;
+    if (globalSshKeyModalEl) {
+        globalSshKeyModal = new bootstrap.Modal(globalSshKeyModalEl);
+    }
 
-            const originalText = saveGlobalSshKeyBtn.innerHTML;
-            saveGlobalSshKeyBtn.disabled = true;
-            saveGlobalSshKeyBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> 保存中...';
+    const globalSshKeyHubBtn = document.getElementById('globalSshKeyHubBtn');
+    const globalSshKeyInput = document.getElementById('globalSshKeyInput');
+    const globalSshKeyFileInput = document.getElementById('globalSshKeyFileInput');
+    const submitGlobalSshKeyBtn = document.getElementById('submitGlobalSshKeyBtn');
 
+    // 1. 点击 Hub 按钮时拉取当前公钥并打开弹窗
+    if (globalSshKeyHubBtn) {
+        globalSshKeyHubBtn.addEventListener('click', async () => {
+            if (typeof networkConfigHubModal !== 'undefined') {
+                const hubModalInstance = bootstrap.Modal.getInstance(document.getElementById('networkConfigHubModal'));
+                if (hubModalInstance) hubModalInstance.hide();
+            }
+            
+            if (globalSshKeyInput) globalSshKeyInput.value = '正在拉取当前保存的公钥...';
+            
+            try {
+                const response = await apiRequest('/oci/api/default-ssh-key');
+                if (globalSshKeyInput) globalSshKeyInput.value = response.key || '';
+            } catch (error) {
+                if (globalSshKeyInput) globalSshKeyInput.value = '';
+            }
+            
+            // 清空文件选择器
+            if (globalSshKeyFileInput) globalSshKeyFileInput.value = '';
+            setTimeout(() => { if (globalSshKeyModal) globalSshKeyModal.show(); }, 200);
+        });
+    }
+
+    // 2. 选择文件后自动读取内容至 Textarea
+    if (globalSshKeyFileInput) {
+        globalSshKeyFileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
             const reader = new FileReader();
-            reader.onload = async (e) => {
-                try {
-                    await apiRequest('/oci/api/default-ssh-key', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ key: e.target.result })
-                    });
-                    addLog('全局默认 SSH 公钥保存成功', 'success');
-                    loadAndDisplayDefaultKey();
-                    fileInput.value = '';
-                } catch (error) {
-                    addLog('保存全局公钥失败: ' + error.message, 'error');
-                } finally {
-                    saveGlobalSshKeyBtn.disabled = false;
-                    saveGlobalSshKeyBtn.innerHTML = originalText;
+            reader.onload = (event) => {
+                if (globalSshKeyInput) {
+                    globalSshKeyInput.value = event.target.result;
+                    addLog('公钥文件读取成功，已填充至输入框', 'success');
                 }
             };
-            reader.onerror = () => {
-                addLog('读取公钥文件失败', 'error');
-                saveGlobalSshKeyBtn.disabled = false;
-                saveGlobalSshKeyBtn.innerHTML = originalText;
-            };
+            reader.onerror = () => addLog('读取公钥文件失败', 'error');
             reader.readAsText(file);
         });
     }
+
+    // 3. 提交并保存公钥
+    if (submitGlobalSshKeyBtn) {
+        submitGlobalSshKeyBtn.addEventListener('click', async () => {
+            const keyContent = globalSshKeyInput?.value.trim() || '';
+            
+            submitGlobalSshKeyBtn.disabled = true;
+            const spinner = submitGlobalSshKeyBtn.querySelector('.spinner-border');
+            if (spinner) spinner.classList.remove('d-none');
+
+            try {
+                const response = await apiRequest('/oci/api/default-ssh-key', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ key: keyContent })
+                });
+                
+                addLog(response.message || '全局默认 SSH 公钥保存成功', 'success');
+                if (globalSshKeyModal) globalSshKeyModal.hide();
+                
+                // 刷新添加账户页面的状态徽章
+                loadAndDisplayDefaultKey(); 
+            } catch (error) {
+                // error 会被 apiRequest 的 catch 自动 log
+            } finally {
+                submitGlobalSshKeyBtn.disabled = false;
+                if (spinner) spinner.classList.add('d-none');
+            }
+        });
+    }
+    // -----------------------------------------------------------
 
     document.getElementById('addAccountModal').addEventListener('shown.bs.modal', loadAndDisplayDefaultKey);
     profilesHubModalEl?.addEventListener('show.bs.modal', () => {
@@ -216,6 +262,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     let globalCfStatus = null;
     let globalTgStatus = null;
+    let globalSshStatus = null;
 
     const accountColors = {};
     const colorPalette = ['#007bff', '#28a745', '#dc3545', '#ffc107', '#17a2b8', '#6610f2', '#e83e8c'];
@@ -732,15 +779,19 @@ document.addEventListener('DOMContentLoaded', function() {
     refreshInstancesBtn.addEventListener('click', () => refreshInstances(false));
 
     function updateStatCards({ profileCount = null, currentAlias = null, runningCount = null, completedCount = null, cloudflareConfigured = null, tgConfigured = null, defaultKeyConfigured = null } = {}) {
+        // 1. 账号管理卡片
         if (profilesStatValue) {
             profilesStatValue.textContent = profileCount !== null ? `${profileCount} Accounts` : 'OCI Profiles';
         }
         if (profilesStatSub) {
-            const profileBits = [];
-            if (currentAlias) profileBits.push(`当前: ${currentAlias}`);
-            if (defaultKeyConfigured !== null) profileBits.push(defaultKeyConfigured ? '默认SSH已配置' : '默认SSH未配置');
-            profilesStatSub.textContent = profileBits.length ? profileBits.join(' · ') : '连接、排序、编辑、代理与密钥管理';
+            if (currentAlias) {
+                profilesStatSub.textContent = `当前连接: ${currentAlias}`;
+            } else {
+                profilesStatSub.textContent = '连接、排序、编辑、代理与配置管理';
+            }
         }
+        
+        // 2. 抢占任务卡片
         if (snatchStatValue && (runningCount !== null || completedCount !== null)) {
             snatchStatValue.textContent = `${runningCount ?? 0} Running / ${completedCount ?? 0} Done`;
         }
@@ -748,16 +799,20 @@ document.addEventListener('DOMContentLoaded', function() {
             snatchStatSub.textContent = '实时任务、日志、暂停恢复与删除';
         }
 
+        // 3. 记录网络与配置卡片状态
         if (cloudflareConfigured !== null) globalCfStatus = cloudflareConfigured;
         if (tgConfigured !== null) globalTgStatus = tgConfigured;
+        if (defaultKeyConfigured !== null) globalSshStatus = defaultKeyConfigured;
 
+        // 4. 更新网络与配置卡片显示
         if (networkStatValue) {
+            const ssh = globalSshStatus === null ? 'SSH 未知' : (globalSshStatus ? 'SSH 已配置' : 'SSH 未配置');
             const cf = globalCfStatus === null ? 'CF 未知' : (globalCfStatus ? 'CF 已配置' : 'CF 未配置');
             const tg = globalTgStatus === null ? 'TG 未知' : (globalTgStatus ? 'TG 已配置' : 'TG 未配置');
-            networkStatValue.textContent = `${cf} / ${tg}`;
+            networkStatValue.textContent = `${ssh} / ${cf} / ${tg}`;
         }
         if (networkStatSub) {
-            networkStatSub.textContent = currentAlias ? `当前账号: ${currentAlias}` : '统一管理规则、域名解析与通知能力';
+            networkStatSub.textContent = '统一管理全局公钥、安全规则与通知解析';
         }
     }
 
@@ -853,7 +908,7 @@ document.addEventListener('DOMContentLoaded', function() {
         connectedProfileEmptyState.innerHTML = `
             <div class="mb-2"><i class="bi bi-person-bounding-box fs-2"></i></div>
             <strong>${message}</strong>
-            <div class="small mt-2">连接账号后，这里会展示区域、代理、租户创建时间与 SSH 配置状态。</div>
+            <div class="small mt-2">连接账号后，这里会展示区域、代理与租户创建时间等详情。</div>
         `;
         connectedProfileEmptyState.classList.remove('d-none');
         connectedProfileDetails.classList.add('d-none');
