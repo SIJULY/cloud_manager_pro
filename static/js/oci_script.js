@@ -927,20 +927,28 @@ document.addEventListener('DOMContentLoaded', function() {
             });
 
             if (data.logged_in && data.alias) {
-                currentProfileStatus.textContent = `已连接: ${data.alias}`;
-                actionAreaProfile.textContent = `当前账号: ${data.alias}`;
-                actionAreaProfile.classList.remove('d-none');
+                // ✨ 加上检查：只有当标签存在时才更新文字
+                if (currentProfileStatus) {
+                    currentProfileStatus.textContent = `已连接: ${data.alias}`;
+                }
+                
+                if (actionAreaProfile) {
+                    actionAreaProfile.textContent = `当前账号: ${data.alias}`;
+                    actionAreaProfile.classList.remove('d-none');
+                }
+
                 if (profilesModalCurrentStatus) {
                     profilesModalCurrentStatus.textContent = `当前账号: ${data.alias}`;
                     profilesModalCurrentStatus.classList.remove('d-none');
                     profilesModalCurrentStatus.className = 'badge bg-success-subtle text-success border border-success-subtle';
                 }
+                
                 enableMainControls(true, data.can_create);
                 await renderConnectedProfileDetails(data.alias);
                 await refreshDashboardSummaries(data.alias);
 
                 if (shouldRefreshInstances) {
-                    await refreshInstances(true); // 初次加载可以静默
+                    await refreshInstances(true);
                 }
 
                 const activeRow = document.querySelector(`#profileList tr[data-alias="${data.alias}"]`);
@@ -948,8 +956,15 @@ document.addEventListener('DOMContentLoaded', function() {
                     activeRow.classList.add('table-active', 'profile-disabled');
                 }
             } else {
-                currentProfileStatus.textContent = '未连接';
-                actionAreaProfile.classList.add('d-none');
+                // ✨ 同样加上检查
+                if (currentProfileStatus) {
+                    currentProfileStatus.textContent = '未连接';
+                }
+                
+                if (actionAreaProfile) {
+                    actionAreaProfile.classList.add('d-none');
+                }
+
                 if (profilesModalCurrentStatus) {
                     profilesModalCurrentStatus.className = 'badge bg-secondary-subtle text-secondary border border-secondary-subtle';
                     profilesModalCurrentStatus.classList.add('d-none');
@@ -959,8 +974,15 @@ document.addEventListener('DOMContentLoaded', function() {
                 await refreshDashboardSummaries();
             }
         } catch (error) {
-            currentProfileStatus.textContent = '未连接 (会话检查失败)';
-            actionAreaProfile.classList.add('d-none');
+            // ✨ 错误处理也加上检查
+            if (currentProfileStatus) {
+                currentProfileStatus.textContent = '未连接 (会话检查失败)';
+            }
+            
+            if (actionAreaProfile) {
+                actionAreaProfile.classList.add('d-none');
+            }
+            
             if (profilesModalCurrentStatus) {
                 profilesModalCurrentStatus.className = 'badge bg-danger-subtle text-danger border border-danger-subtle';
                 profilesModalCurrentStatus.classList.add('d-none');
@@ -970,7 +992,7 @@ document.addEventListener('DOMContentLoaded', function() {
             await refreshDashboardSummaries();
         }
     }
-
+    
     function enableMainControls(enabled, canCreate) {
         refreshInstancesBtn.disabled = !enabled;
         createInstanceBtn.disabled = !canCreate;
