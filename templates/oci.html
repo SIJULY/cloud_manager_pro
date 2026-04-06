@@ -92,11 +92,14 @@
         <section class="card oci-section-card connected-profile-card">
             <div class="card-header d-flex justify-content-between align-items-center gap-3 flex-wrap">
                 <div>
-                    <div class="oci-card-title"><i class="bi bi-person-badge"></i><span>当前连接账户</span></div>
+                    <div class="oci-card-title"><i class="bi bi-person-badge"></i><span>当前连接账户详情</span></div>
                     <div class="oci-panel-note mt-2">此处仅展示当前已连接 OCI 账户的详情信息，不支持直接编辑。</div>
                 </div>
                 <div class="d-flex gap-2 flex-wrap align-items-center">
-                    <span class="badge bg-primary d-none" id="actionAreaProfile"></span>
+                    <span class="badge bg-primary d-none align-self-center" id="actionAreaProfile"></span>
+                    <button id="manageUsersBtn" class="btn btn-warning btn-sm profile-action-btn text-dark fw-bold" disabled data-bs-toggle="modal" data-bs-target="#userManagementModal">
+                        <i class="bi bi-people-fill"></i> 身份与用户管理
+                    </button>
                     <button id="createInstanceBtn" class="btn btn-success btn-sm profile-action-btn" disabled data-bs-toggle="modal" data-bs-target="#createLaunchInstanceModal">
                         <i class="bi bi-plus-circle"></i> 创建 / 抢占实例
                     </button>
@@ -152,14 +155,14 @@
         <section class="card oci-section-card">
             <div class="card-header d-flex justify-content-between align-items-center gap-3 flex-wrap">
                 <div>
-                    <div class="oci-card-title"><i class="bi bi-server"></i><span>实例列表</span></div>
-                    <div class="oci-panel-note mt-2">保留原实例列表与全部实例运维功能，支持刷新列表、修改实例、附加/更换 IP、开关机、终止等操作。</div>
+                    <div class="oci-card-title"><i class="bi bi-server"></i><span>实例列表与运维</span></div>
+                    <div class="oci-panel-note mt-2">支持无感静默刷新、修改实例、附加IP、开关机、终止等操作。</div>
                 </div>
                 <div class="d-flex gap-2 flex-wrap">
-                    <button id="networkSettingsBtn" class="d-none" type="button" data-bs-toggle="modal" data-bs-target="#networkSettingsModal" aria-hidden="true" tabindex="-1"></button>
                     <button id="refreshInstancesBtn" class="btn btn-sm btn-primary" disabled>
                         <i class="bi bi-arrow-clockwise"></i> 刷新列表
                     </button>
+                    <button id="networkSettingsBtn" class="d-none" type="button" aria-hidden="true" tabindex="-1"></button>
                 </div>
             </div>
             <div class="card-body p-0">
@@ -995,6 +998,69 @@
         </div>
     </div>
 </div>
+
+
+<div class="modal fade" id="userManagementModal" tabindex="-1" aria-labelledby="userManagementModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-xl">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div>
+                    <h5 class="modal-title fw-bold" id="userManagementModalLabel"><i class="bi bi-shield-lock-fill text-warning"></i> 身份与用户安全管理</h5>
+                    <div class="oci-modal-lead">管理租户下的 IAM 用户。支持重置密码、修改绑定邮箱、强制清除 2FA (双重验证)。</div>
+                </div>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body p-0">
+                <div class="p-3 border-bottom border-secondary d-flex justify-content-between align-items-center" style="background: rgba(2, 6, 23, 0.3);">
+                    <button id="refreshUsersBtn" class="btn btn-sm btn-outline-secondary"><i class="bi bi-arrow-clockwise"></i> 刷新列表</button>
+                    <button id="showCreateUserBtn" class="btn btn-sm btn-primary"><i class="bi bi-person-plus-fill"></i> 创建新用户</button>
+                </div>
+                
+                <div id="createUserFormArea" class="p-3 border-bottom border-secondary d-none" style="background: rgba(2, 6, 23, 0.5);">
+                    <h6 class="fw-bold mb-3 text-info">创建新 IAM 用户</h6>
+                    <div class="row g-2 align-items-end">
+                        <div class="col-md-3">
+                            <label class="form-label small text-light">用户名 (必填)</label>
+                            <input type="text" id="newUserName" class="form-control form-control-sm oci-log" placeholder="例如: admin2">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label small text-light">绑定邮箱 (可选)</label>
+                            <input type="email" id="newUserEmail" class="form-control form-control-sm oci-log" placeholder="例如: user@domain.com">
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label small text-light">备注描述</label>
+                            <input type="text" id="newUserDesc" class="form-control form-control-sm oci-log" value="Created via Web Panel">
+                        </div>
+                        <div class="col-md-2">
+                            <button id="submitCreateUserBtn" class="btn btn-success btn-sm w-100">确认创建</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="table-responsive" style="max-height: 50vh; overflow-y: auto;">
+                    <table class="table table-hover table-dark align-middle mb-0">
+                        <thead class="sticky-top" style="background: rgba(15, 23, 42, 0.95); z-index: 1;">
+                            <tr>
+                                <th style="width: 25%; padding-left: 1rem;">用户名</th>
+                                <th style="width: 25%;">绑定邮箱</th>
+                                <th style="width: 15%; text-align: center;">状态</th>
+                                <th style="width: 35%; text-align: center;">高危安全操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="iamUsersList">
+                            <tr><td colspan="4" class="text-center text-muted py-5">正在拉取租户用户数据...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="modal-footer border-secondary">
+                <div class="alert alert-warning py-1 px-2 m-0 small me-auto border-warning" style="background: rgba(255, 193, 7, 0.1);"><i class="bi bi-exclamation-triangle-fill"></i> 警告: 重置密码将生成一次性密码，若未记录将无法登录！</div>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 
 {% endblock %}
 
