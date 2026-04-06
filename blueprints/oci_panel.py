@@ -1422,19 +1422,30 @@ def get_available_shapes():
             if proxy_url:
                 limits_client.base_client.session.proxies = {'http': proxy_url, 'https': proxy_url}
                 
-            # 查询 Compute 服务的配额限制
-            limits = oci.pagination.list_call_get_all_results(
-                limits_client.list_limit_values,
-                compartment_id=tenancy_ocid,
-                service_name="compute"
-            ).data
-            
-            for limit in limits:
-                # 免费号的 standard-core-count (标准实例核心数) 通常为 0
-                # 只有升级号才会有大于 0 的配额
-                if limit.name == "standard-core-count" and limit.value > 0:
-                    is_upgraded = True
-                    break
+            # ✨ 修复点：必须先获取可用域 (AD)，因为 CPU 配额是 AD 级别的限制
+            identity_client = g.oci_clients['identity']
+            ads = identity_client.list_availability_domains(tenancy_ocid).data
+            ad_name = ads[0].name if ads else None
+
+            if ad_name:
+                # 查询 Compute 服务的配额限制，必须带上 availability_domain
+                limits = oci.pagination.list_call_get_all_results(
+                    limits_client.list_limit_values,
+                    compartment_id=tenancy_ocid,
+                    service_name="compute",
+                    availability_domain=ad_name
+                ).data
+                
+                for limit in limits:
+                    # 付费号的 standard-core-count 或 E3/E4 等常规实例核心配额一定会大于 0
+                    # 免费号这些付费机型核心数全为 0 (只有 a1-core-count 和 micro-core-count)
+                    if limit.name in ["standard-core-count", "standard-e4-core-count", "standard-e3-core-count"]:
+                        if limit.value > 0:
+                            is_upgraded = True
+                            break
+            else:
+                is_upgraded = True # 获取不到 AD，防误杀，直接放行
+                
         except Exception as e:
             logging.warning(f"检测账号配额失败，为防误杀，默认按升级号处理: {e}")
             is_upgraded = True 
@@ -1930,6 +1941,97 @@ def _update_instance_details_task(task_id, profile_config, data):
         _db_execute_celery('UPDATE tasks SET status = ?, result = ?, completed_at = ? WHERE id = ?', ('success', result_message, datetime.datetime.now(timezone.utc).isoformat(), task_id))
     except Exception as e:
         _db_execute_celery('UPDATE tasks SET status = ?, result = ?, completed_at = ? WHERE id = ?', ('failure', f"❌ 操作失败: {e}", datetime.datetime.now(timezone.utc).isoformat(), task_id))
+
+# ==========================================
+# ✨✨✨ 新增：IAM 身份与用户管理核心 API ✨✨✨
+# ==========================================
+
+@oci_bp.route('/api/identity/users', methods=['GET', 'POST'])
+@login_required
+@oci_clients_required
+@timeout(30)
+def handle_identity_users():
+    identity_client = g.oci_clients['identity']
+    tenancy_ocid = g.oci_config['tenancy']
+    
+    if request.method == 'GET':
+        try:
+            # 获取当前租户下的所有用户
+            users = oci.pagination.list_call_get_all_results(
+                identity_client.list_users, 
+                compartment_id=tenancy_ocid
+            ).data
+            user_list = []
+            for u in users:
+                user_list.append({
+                    "id": u.id,
+                    "name": u.name,
+                    "description": u.description or "无",
+                    "email": u.email or "未绑定",
+                    "lifecycle_state": u.lifecycle_state,
+                    "time_created": u.time_created.isoformat() if u.time_created else ""
+                })
+            return jsonify(user_list)
+        except ServiceError as e:
+            return jsonify({"error": f"API 错误 ({e.status}): {e.message}"}), 500
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
+    elif request.method == 'POST':
+        data = request.json
+        try:
+            details = oci.identity.models.CreateUserDetails(
+                compartment_id=tenancy_ocid,
+                name=data.get('name'),
+                description=data.get('description', 'Created via Web Panel'),
+                email=data.get('email')
+            )
+            new_user = identity_client.create_user(details).data
+            return jsonify({"success": True, "message": f"用户 {new_user.name} 创建成功！", "user_id": new_user.id})
+        except Exception as e:
+            return jsonify({"error": f"创建用户失败: {e}"}), 500
+
+@oci_bp.route('/api/identity/users/<user_id>/<action>', methods=['POST'])
+@login_required
+@oci_clients_required
+@timeout(30)
+def handle_user_actions(user_id, action):
+    identity_client = g.oci_clients['identity']
+    try:
+        if action == 'reset-password':
+            # 重置 UI 登录密码并返回一次性密码
+            res = identity_client.create_or_reset_ui_password(user_id).data
+            return jsonify({"success": True, "message": "密码重置成功！请务必妥善保存生成的一次性密码。", "new_password": res.password})
+            
+        elif action == 'clear-2fa':
+            # 获取用户绑定的所有 TOTP 设备并逐一删除
+            devices = oci.pagination.list_call_get_all_results(identity_client.list_mfa_totp_devices, user_id=user_id).data
+            if not devices:
+                return jsonify({"success": True, "message": "该用户当前没有绑定任何 2FA 验证器。"})
+            for d in devices:
+                identity_client.delete_mfa_totp_device(user_id=user_id, mfa_totp_device_id=d.id)
+            return jsonify({"success": True, "message": f"成功清除了 {len(devices)} 个 2FA 绑定的设备！用户下次登录将无需验证码。"})
+            
+        elif action == 'update-email':
+            # 更新邮箱
+            new_email = request.json.get('email')
+            if not new_email:
+                return jsonify({"error": "新邮箱不能为空"}), 400
+            details = oci.identity.models.UpdateUserDetails(email=new_email)
+            identity_client.update_user(user_id, details)
+            return jsonify({"success": True, "message": f"邮箱已成功更新为: {new_email}"})
+            
+        else:
+            return jsonify({"error": "未知的操作指令"}), 400
+            
+    except ServiceError as e:
+        if "IdentityDomains" in str(e) or e.status == 404:
+            return jsonify({"error": f"操作失败: 甲骨文已将您的租户迁移至新型 Identity Domains，传统 IAM 接口不兼容此操作。错误代码: {e.status}"}), 400
+        return jsonify({"error": f"API 拒绝操作: {e.message}"}), 500
+    except Exception as e:
+        return jsonify({"error": f"执行失败: {e}"}), 500
+
+        
 
 @celery.task
 def _instance_action_task(task_id, profile_config, action, instance_id, data):
