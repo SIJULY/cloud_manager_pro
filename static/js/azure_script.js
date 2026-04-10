@@ -415,6 +415,57 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
+    function pollTaskStatus(taskId, {
+        successMessage = '任务执行成功',
+        failurePrefix = '任务执行失败',
+        onSuccess = null,
+        onFailure = null,
+        interval = 3000,
+        timeout = 600000
+    } = {}) {
+        const startedAt = Date.now();
+
+        const check = () => {
+            apiCall(`/azure/api/task_status/${taskId}`).then(task => {
+                if (!task || !task.status) {
+                    setTimeout(check, interval);
+                    return;
+                }
+
+                if (task.status === 'pending' || task.status === 'running') {
+                    if (Date.now() - startedAt > timeout) {
+                        log('任务状态轮询超时，请稍后手动刷新查看结果', 'error');
+                        return;
+                    }
+                    setTimeout(check, interval);
+                    return;
+                }
+
+                if (task.status === 'success') {
+                    log(task.result || successMessage, 'success');
+                    if (typeof onSuccess === 'function') onSuccess(task);
+                    return;
+                }
+
+                if (task.status === 'failure') {
+                    log(task.result || failurePrefix, 'error');
+                    if (typeof onFailure === 'function') onFailure(task);
+                    return;
+                }
+
+                setTimeout(check, interval);
+            }).catch(err => {
+                if (Date.now() - startedAt > timeout) {
+                    log(`任务状态查询失败并已超时: ${err.message}`, 'error');
+                    return;
+                }
+                setTimeout(check, interval);
+            });
+        };
+
+        check();
+    }
+
     function handleVmAction(action) {
         if (!selectedVm || !selectedAccount) return;
         if (!confirm(`确定要对 VM [${selectedVm.name}] 执行 [${action}] 操作吗？`)) return;
@@ -491,6 +542,17 @@ document.addEventListener('DOMContentLoaded', function() {
                 method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)
             }).then(res => {
                 log(res.message || '实例部署任务已提交后台执行', 'info');
+                if (res.task_id) {
+                    log('已开始后台跟踪创建任务状态，创建成功后将自动静默刷新列表', 'info');
+                    pollTaskStatus(res.task_id, {
+                        successMessage: '虚拟机创建成功',
+                        failurePrefix: '虚拟机创建失败',
+                        onSuccess: () => {
+                            loadVms({ silent: true });
+                            [3000, 8000, 15000].forEach(delay => setTimeout(() => loadVms({ silent: true }), delay));
+                        }
+                    });
+                }
             }).catch(e => {
                 log("创建虚拟机任务提交失败: " + e.message, 'error');
             });
