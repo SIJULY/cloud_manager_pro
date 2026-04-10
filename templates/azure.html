@@ -122,7 +122,7 @@
                     <div class="connected-profile-summary-3">
                         <div class="connected-profile-item"><div class="connected-profile-item-label">连接状态</div><div class="connected-profile-item-value"><span class="badge bg-success-subtle text-success border border-success-subtle">已连接</span></div></div>
                         <div class="connected-profile-item"><div class="connected-profile-item-label">到期时间</div><div id="connectedProfileExpiration" class="connected-profile-item-value compact">-</div></div>
-                        <div class="connected-profile-item"><div class="connected-profile-item-label">备注</div><div class="connected-profile-item-value text-muted small">Azure Service Principal</div></div>
+                        <div class="connected-profile-item"><div class="connected-profile-item-label">订阅名称</div><div id="connectedProfileSubscriptionName" class="connected-profile-item-value compact text-muted">加载中 / 未查询</div></div>
                     </div>
                 </div>
             </div>
@@ -159,7 +159,7 @@
                     <button type="button" id="startBtn" class="btn btn-success" disabled>启动</button>
                     <button type="button" id="stopBtn" class="btn btn-danger" disabled>关机</button>
                     <button type="button" id="restartBtn" class="btn btn-warning" disabled>重启</button>
-                    <button type="button" id="changeIpBtn" class="btn btn-info" disabled>更换静态IP</button>
+                    <button type="button" id="changeIpBtn" class="btn btn-info" disabled>更换动态IP</button>
                     <button type="button" id="deleteBtn" class="btn btn-danger" disabled>删除VM</button>
                 </div>
             </div>
@@ -309,5 +309,5 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="{{ url_for('static', filename='js/azure_script.js', v='2026040503') }}"></script>
+<script src="{{ url_for('static', filename='js/azure_script.js', v='2026041002') }}"></script>
 {% endblock %}
