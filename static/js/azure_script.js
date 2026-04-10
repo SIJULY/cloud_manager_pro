@@ -34,11 +34,15 @@ document.addEventListener('DOMContentLoaded', function() {
         connectedProfileAppId: document.getElementById('connectedProfileAppId'),
         connectedProfileTenantId: document.getElementById('connectedProfileTenantId'),
         connectedProfileSubId: document.getElementById('connectedProfileSubId'),
-        connectedProfileExpiration: document.getElementById('connectedProfileExpiration')
+        connectedProfileExpiration: document.getElementById('connectedProfileExpiration'),
+        connectedProfileSubscriptionName: document.getElementById('connectedProfileSubscriptionName')
     };
 
     let selectedAccount = null;
     let selectedVm = null;
+    let vmSilentRefreshTimer = null;
+    let lastVmSnapshot = '';
+    let pendingIpChange = null;
 
     function log(message, type = 'info') {
         const timestamp = new Date().toLocaleTimeString();
@@ -81,6 +85,17 @@ document.addEventListener('DOMContentLoaded', function() {
         UI.connectedProfileSubId.textContent = account.subscription_id;
         UI.connectedProfileSubId.title = account.subscription_id;
         UI.connectedProfileExpiration.textContent = account.expiration_date || '永久 / 未设置';
+        if (UI.connectedProfileSubscriptionName) UI.connectedProfileSubscriptionName.textContent = '加载中 / 未查询';
+    }
+
+    function loadSubscriptionName({ silent = false } = {}) {
+        if (!selectedAccount) return;
+        apiCall('/azure/api/subscription-summary').then(summary => {
+            if (UI.connectedProfileSubscriptionName) UI.connectedProfileSubscriptionName.textContent = summary.subscription_name || '未查询';
+        }).catch(err => {
+            if (UI.connectedProfileSubscriptionName) UI.connectedProfileSubscriptionName.textContent = '查询失败';
+            if (!silent) log(`订阅名称查询失败: ${err.message}`, 'error');
+        });
     }
 
     function updateActionButtons() {
@@ -95,8 +110,132 @@ document.addEventListener('DOMContentLoaded', function() {
         if(UI.startBtn) UI.startBtn.disabled = !hasVm;
         if(UI.stopBtn) UI.stopBtn.disabled = !hasVm;
         if(UI.restartBtn) UI.restartBtn.disabled = !hasVm;
-        if(UI.changeIpBtn) UI.changeIpBtn.disabled = !hasVm;
+        if(UI.changeIpBtn) UI.changeIpBtn.disabled = !hasVm || !!pendingIpChange;
         if(UI.deleteBtn) UI.deleteBtn.disabled = !hasVm;
+    }
+
+    function setChangeIpLoading(isLoading) {
+        if (!UI.changeIpBtn) return;
+        if (isLoading) {
+            UI.changeIpBtn.disabled = true;
+            UI.changeIpBtn.dataset.originalText = UI.changeIpBtn.dataset.originalText || UI.changeIpBtn.innerHTML;
+            UI.changeIpBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>更换中...';
+        } else {
+            UI.changeIpBtn.innerHTML = UI.changeIpBtn.dataset.originalText || '更换动态IP';
+            updateActionButtons();
+        }
+    }
+
+    function getIpTypeLabel(vm) {
+        const method = (vm && vm.ip_allocation_method ? String(vm.ip_allocation_method) : '').toLowerCase();
+        if (method === 'dynamic') return '动态IP';
+        if (method === 'static') return '静态IP';
+        if (vm && vm.public_ip && vm.public_ip !== 'N/A' && vm.public_ip !== '查询失败') return '未知类型';
+        return '';
+    }
+
+    function formatPublicIp(vm) {
+        const ipTypeLabel = getIpTypeLabel(vm);
+        if (!vm || !vm.public_ip || vm.public_ip === 'N/A') {
+            if (ipTypeLabel === '动态IP') return '分配中 (动态IP)';
+            return '-';
+        }
+        return ipTypeLabel ? `${vm.public_ip} (${ipTypeLabel})` : vm.public_ip;
+    }
+
+    function renderVmList(vms, { silent = false } = {}) {
+        const selectedVmKey = selectedVm ? `${selectedVm.resource_group}::${selectedVm.name}` : null;
+        const snapshot = JSON.stringify(vms.map(vm => ({
+            name: vm.name,
+            resource_group: vm.resource_group,
+            status: vm.status,
+            public_ip: vm.public_ip,
+            ip_allocation_method: vm.ip_allocation_method,
+            location: vm.location
+        })));
+
+        if (pendingIpChange) {
+            const targetVm = vms.find(vm => `${vm.resource_group}::${vm.name}` === pendingIpChange.vmKey);
+            if (targetVm) {
+                const currentIp = targetVm.public_ip || '';
+                const targetType = getIpTypeLabel(targetVm);
+                if (currentIp && currentIp !== pendingIpChange.oldIp) {
+                    log(`动态 IP 已分配完成: ${targetVm.name} -> ${currentIp}`, 'success');
+                    pendingIpChange = null;
+                    setChangeIpLoading(false);
+                } else if (targetType === '动态IP' && !currentIp) {
+                    log(`动态 IP 资源已创建，正在等待 Azure 分配地址: ${targetVm.name}`, 'info');
+                }
+            }
+        }
+
+        if (silent && snapshot === lastVmSnapshot) {
+            return;
+        }
+        lastVmSnapshot = snapshot;
+
+        UI.vmList.innerHTML = '';
+
+        if (vms.length === 0) {
+            UI.vmList.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-4">该订阅下未找到虚拟机</td></tr>';
+            selectedVm = null;
+            updateActionButtons();
+            return;
+        }
+
+        let matchedSelectedVm = null;
+        vms.forEach(vm => {
+            const tr = document.createElement('tr');
+            tr.style.cursor = 'pointer';
+            let stateColor = 'status-other';
+            if (vm.status.includes('running')) stateColor = 'status-running';
+            if (vm.status.includes('deallocated') || vm.status.includes('stopped')) stateColor = 'status-stopped';
+
+            tr.innerHTML = `
+                <td class="fw-bold" style="padding-left: 1rem;">${vm.name}</td>
+                <td class="text-center"><span class="badge bg-secondary">${vm.resource_group}</span></td>
+                <td class="text-center"><div class="status-cell"><span class="status-dot ${stateColor}"></span>${vm.status}</div></td>
+                <td class="text-center text-info">${formatPublicIp(vm)}</td>
+                <td class="text-center">${vm.location}</td>
+            `;
+
+            const currentVmKey = `${vm.resource_group}::${vm.name}`;
+            if (selectedVmKey && currentVmKey === selectedVmKey) {
+                tr.classList.add('table-active');
+                matchedSelectedVm = vm;
+            }
+
+            tr.addEventListener('click', () => {
+                document.querySelectorAll('#vmList tr').forEach(r => r.classList.remove('table-active'));
+                tr.classList.add('table-active');
+                selectedVm = vm;
+                updateActionButtons();
+            });
+            UI.vmList.appendChild(tr);
+        });
+
+        selectedVm = matchedSelectedVm;
+        updateActionButtons();
+    }
+
+    function startSilentVmRefresh() {
+        if (vmSilentRefreshTimer) clearInterval(vmSilentRefreshTimer);
+        vmSilentRefreshTimer = setInterval(() => {
+            if (!selectedAccount || document.hidden) return;
+            loadVms({ silent: true });
+            const now = Date.now();
+            if (!window.__azureLastSummaryRefreshAt || now - window.__azureLastSummaryRefreshAt > 60000) {
+                window.__azureLastSummaryRefreshAt = now;
+                loadSubscriptionName({ silent: true });
+            }
+        }, 8000);
+    }
+
+    function stopSilentVmRefresh() {
+        if (vmSilentRefreshTimer) {
+            clearInterval(vmSilentRefreshTimer);
+            vmSilentRefreshTimer = null;
+        }
     }
 
     // ✨ 核心修复：纯本地 JS 计算存活状态，还原 V1 逻辑 ✨
@@ -135,7 +274,13 @@ document.addEventListener('DOMContentLoaded', function() {
 
             selectedAccount = null;
             selectedVm = null;
+            pendingIpChange = null;
+            lastVmSnapshot = '';
+            stopSilentVmRefresh();
+            setChangeIpLoading(false);
+            window.__azureLastSummaryRefreshAt = 0;
             UI.currentAccountStatus.textContent = '未连接';
+            if (UI.connectedProfileSubscriptionName) UI.connectedProfileSubscriptionName.textContent = '加载中 / 未查询';
             UI.connectedProfileEmptyState.classList.remove('d-none');
             UI.connectedProfileDetails.classList.add('d-none');
             UI.vmList.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-5">请先连接账户并点击刷新</td></tr>';
@@ -146,7 +291,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function loadAccounts() {
-        apiCall('/azure/api/accounts').then(accounts => {
+        apiCall('/azure/api/accounts').then(async accounts => {
             UI.accountList.innerHTML = '';
             if (accounts.length === 0) {
                 UI.accountList.innerHTML = '<tr><td colspan="6" class="text-center text-muted">暂无账户，请先添加</td></tr>';
@@ -178,6 +323,9 @@ document.addEventListener('DOMContentLoaded', function() {
                     log(`已成功连接到 Azure 账户: ${acc.name}`, 'success');
 
                     if (UI.accountsModal) UI.accountsModal.hide();
+                    window.__azureLastSummaryRefreshAt = Date.now();
+                    startSilentVmRefresh();
+                    loadSubscriptionName();
                     loadVms();
                 });
 
@@ -194,6 +342,22 @@ document.addEventListener('DOMContentLoaded', function() {
                 });
                 UI.accountList.appendChild(tr);
             });
+
+            try {
+                const sessionInfo = await apiCall('/azure/api/session');
+                if (sessionInfo && sessionInfo.logged_in) {
+                    const matchedAccount = accounts.find(acc => acc.name === sessionInfo.name);
+                    if (matchedAccount) {
+                        selectedAccount = matchedAccount;
+                        updateConnectedProfileUI(matchedAccount);
+                        updateActionButtons();
+                        window.__azureLastSummaryRefreshAt = Date.now();
+                        startSilentVmRefresh();
+                        loadSubscriptionName({ silent: true });
+                        loadVms({ silent: true });
+                    }
+                }
+            } catch (e) {}
         }).catch(err => {
             log("加载账号失败: " + err.message, "error");
             UI.accountList.innerHTML = `<tr><td colspan="6" class="text-center text-danger">加载失败: ${err.message}</td></tr>`;
@@ -230,50 +394,24 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    function loadVms() {
+    function loadVms({ silent = false } = {}) {
         if (!selectedAccount) return log('请先连接一个 Azure 账号。', 'warning');
-        log("正在获取 Azure 虚拟机列表...");
-        UI.refreshBtn.disabled = true;
-        UI.vmList.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-5"><div class="spinner-border spinner-border-sm"></div> 正在加载...</td></tr>';
+        if (!silent) {
+            log("正在获取 Azure 虚拟机列表...");
+            UI.refreshBtn.disabled = true;
+            UI.vmList.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-5"><div class="spinner-border spinner-border-sm"></div> 正在加载...</td></tr>';
+        }
 
-        // 彻底还原 V1 调法：直接请求，不带 account_name 参数
         apiCall(`/azure/api/vms`).then(vms => {
-            UI.vmList.innerHTML = '';
-            selectedVm = null;
-            updateActionButtons();
-
-            if (vms.length === 0) {
-                UI.vmList.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-4">该订阅下未找到虚拟机</td></tr>';
-                return;
-            }
-            vms.forEach(vm => {
-                const tr = document.createElement('tr');
-                tr.style.cursor = 'pointer';
-                let stateColor = 'status-other';
-                if (vm.status.includes('running')) stateColor = 'status-running';
-                if (vm.status.includes('deallocated') || vm.status.includes('stopped')) stateColor = 'status-stopped';
-
-                tr.innerHTML = `
-                    <td class="fw-bold" style="padding-left: 1rem;">${vm.name}</td>
-                    <td class="text-center"><span class="badge bg-secondary">${vm.resource_group}</span></td>
-                    <td class="text-center"><div class="status-cell"><span class="status-dot ${stateColor}"></span>${vm.status}</div></td>
-                    <td class="text-center text-info">${vm.public_ip || '-'}</td>
-                    <td class="text-center">${vm.location}</td>
-                `;
-                tr.addEventListener('click', () => {
-                    document.querySelectorAll('#vmList tr').forEach(r => r.classList.remove('table-active'));
-                    tr.classList.add('table-active');
-                    selectedVm = vm;
-                    updateActionButtons();
-                });
-                UI.vmList.appendChild(tr);
-            });
-            log("虚拟机列表加载成功", 'success');
+            renderVmList(vms, { silent });
+            if (!silent) log("虚拟机列表加载成功", 'success');
         }).catch(error => {
-            UI.vmList.innerHTML = `<tr><td colspan="5" class="text-center text-danger">加载失败: ${error.message}</td></tr>`;
-            log(`加载虚拟机异常: ${error.message}`, 'error');
+            if (!silent) {
+                UI.vmList.innerHTML = `<tr><td colspan="5" class="text-center text-danger">加载失败: ${error.message}</td></tr>`;
+                log(`加载虚拟机异常: ${error.message}`, 'error');
+            }
         }).finally(() => {
-            UI.refreshBtn.disabled = false;
+            if (!silent) UI.refreshBtn.disabled = false;
         });
     }
 
@@ -287,7 +425,7 @@ document.addEventListener('DOMContentLoaded', function() {
             body: JSON.stringify({ action: action, resource_group: selectedVm.resource_group, vm_name: selectedVm.name })
         }).then(res => {
             log(res.message || '操作已成功发送', 'success');
-            setTimeout(loadVms, 2500);
+            setTimeout(() => loadVms({ silent: true }), 2500);
         }).catch(err => log(err.message, 'error'));
     }
 
@@ -300,16 +438,26 @@ document.addEventListener('DOMContentLoaded', function() {
     if (UI.changeIpBtn) {
         UI.changeIpBtn.addEventListener('click', () => {
             if (!selectedVm || !selectedAccount) return;
-            if (!confirm(`确定要为 [${selectedVm.name}] 重新申请静态 IP 吗？`)) return;
-            log(`正在为 ${selectedVm.name} 更换 IP...`);
+            if (!confirm(`确定要为 [${selectedVm.name}] 重新申请动态 IP 吗？`)) return;
+            pendingIpChange = {
+                vmKey: `${selectedVm.resource_group}::${selectedVm.name}`,
+                oldIp: selectedVm.public_ip || ''
+            };
+            setChangeIpLoading(true);
+            log(`正在为 ${selectedVm.name} 更换动态 IP...`);
 
             apiCall('/azure/api/vm-change-ip', {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ resource_group: selectedVm.resource_group, vm_name: selectedVm.name })
             }).then(res => {
                 log(res.message, 'success');
-                setTimeout(loadVms, 3000);
-            }).catch(err => log(err.message, 'error'));
+                const refreshSteps = [3000, 8000, 15000, 25000, 35000];
+                refreshSteps.forEach(delay => setTimeout(() => loadVms({ silent: true }), delay));
+            }).catch(err => {
+                pendingIpChange = null;
+                setChangeIpLoading(false);
+                log(err.message, 'error');
+            });
         });
     }
 
@@ -350,6 +498,14 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     if(UI.clearLogBtn) UI.clearLogBtn.addEventListener('click', () => { UI.logOutput.innerHTML = ''; });
+
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) return;
+        if (selectedAccount) {
+            loadVms({ silent: true });
+            loadSubscriptionName({ silent: true });
+        }
+    });
 
     loadAccounts();
 });
