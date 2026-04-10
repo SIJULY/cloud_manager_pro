@@ -1,4 +1,5 @@
 import os, json, time, logging, uuid, sqlite3, string, random, base64
+import requests
 from flask import Blueprint, render_template, jsonify, request, session, g, redirect, url_for
 from functools import wraps
 from azure.identity import ClientSecretCredential
@@ -85,6 +86,157 @@ def generate_password(length=12):
     characters = string.ascii_letters + string.digits + "!@#$%^&*()"
     return ''.join(random.choice(characters) for i in range(length))
 
+def _azure_management_get(access_token, url, params=None, timeout=20):
+    response = requests.get(
+        url,
+        headers={"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"},
+        params=params or {},
+        timeout=timeout
+    )
+    response.raise_for_status()
+    return response.json() if response.content else {}
+
+def _azure_management_post(access_token, url, json_body=None, params=None, timeout=30):
+    response = requests.post(
+        url,
+        headers={"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"},
+        params=params or {},
+        json=json_body or {},
+        timeout=timeout
+    )
+    response.raise_for_status()
+    return response.json() if response.content else {}
+
+def _query_cost_usage_fallback(access_token, subscription_id, assumed_credit=100.0):
+    today = time.strftime('%Y-%m-%d')
+    period_start = time.strftime('%Y-%m-%d', time.localtime(time.time() - 365 * 24 * 60 * 60))
+    cost_query_body = {
+        "type": "ActualCost",
+        "timeframe": "Custom",
+        "timePeriod": {
+            "from": f"{period_start}T00:00:00+00:00",
+            "to": f"{today}T23:59:59+00:00"
+        },
+        "dataset": {
+            "granularity": "None",
+            "aggregation": {
+                "totalCost": {
+                    "name": "PreTaxCost",
+                    "function": "Sum"
+                }
+            }
+        }
+    }
+
+    api_versions = ["2023-03-01", "2022-10-01", "2021-10-01"]
+    last_exception = None
+    for api_version in api_versions:
+        try:
+            resp = _azure_management_post(
+                access_token,
+                f"https://management.azure.com/subscriptions/{subscription_id}/providers/Microsoft.CostManagement/query",
+                json_body=cost_query_body,
+                params={"api-version": api_version}
+            )
+            rows = resp.get('properties', {}).get('rows', [])
+            if not rows:
+                continue
+            used_balance = float(rows[0][0])
+            remaining_balance = round(max(assumed_credit - used_balance, 0), 2)
+            return {
+                "currency": "USD",
+                "beginning_balance": assumed_credit,
+                "remaining_balance": remaining_balance,
+                "used_balance": round(used_balance, 2),
+                "balance_source": f"Microsoft.CostManagement/query ({api_version})",
+                "balance_available": True,
+                "is_estimated": True,
+                "estimated_credit_limit": assumed_credit,
+                "message": f"官方余额接口不可用，已按近365天累计消费估算学生额度（总额度 {assumed_credit:.0f} USD）"
+            }
+        except Exception as e:
+            last_exception = e
+            continue
+
+    raise last_exception if last_exception else RuntimeError("无法通过 Cost Management 查询消费金额")
+
+def _get_subscription_summary(credential, subscription_id):
+    access_token = credential.get_token("https://management.azure.com/.default").token
+    subscription_name = subscription_id
+    subscription_state = None
+    balance_info = {
+        "currency": None,
+        "beginning_balance": None,
+        "remaining_balance": None,
+        "used_balance": None,
+        "balance_source": None,
+        "balance_available": False,
+        "is_estimated": False,
+        "estimated_credit_limit": None,
+        "message": "当前订阅暂未查询到余额信息"
+    }
+
+    try:
+        sub_resp = _azure_management_get(
+            access_token,
+            f"https://management.azure.com/subscriptions/{subscription_id}",
+            params={"api-version": "2020-01-01"}
+        )
+        subscription_name = sub_resp.get('displayName') or subscription_name
+        subscription_state = sub_resp.get('state')
+    except Exception as e:
+        logging.warning(f"获取 Azure 订阅基础信息失败: {e}")
+
+    balance_api_versions = ["2024-08-01", "2023-03-01", "2022-10-01", "2019-10-01"]
+    balance_exception = None
+    for api_version in balance_api_versions:
+        try:
+            balance_resp = _azure_management_get(
+                access_token,
+                f"https://management.azure.com/subscriptions/{subscription_id}/providers/Microsoft.Consumption/balances",
+                params={"api-version": api_version}
+            )
+            balance_items = balance_resp.get('value') if isinstance(balance_resp, dict) else None
+            if not balance_items:
+                continue
+            balance = balance_items[0]
+            properties = balance.get('properties', {})
+            beginning_balance = properties.get('beginningBalance')
+            remaining_balance = properties.get('currentBalance')
+            currency = properties.get('currency') or properties.get('billingCurrency')
+            used_balance = None
+            if beginning_balance is not None and remaining_balance is not None:
+                used_balance = round(float(beginning_balance) - float(remaining_balance), 2)
+            balance_info.update({
+                "currency": currency,
+                "beginning_balance": beginning_balance,
+                "remaining_balance": remaining_balance,
+                "used_balance": used_balance,
+                "balance_source": f"Microsoft.Consumption/balances ({api_version})",
+                "balance_available": True,
+                "message": "余额信息查询成功"
+            })
+            break
+        except Exception as e:
+            balance_exception = e
+            continue
+
+    if not balance_info["balance_available"]:
+        try:
+            balance_info.update(_query_cost_usage_fallback(access_token, subscription_id, assumed_credit=100.0))
+        except Exception as fallback_e:
+            if balance_exception:
+                balance_info["message"] = f"官方余额接口不可用，且消费估算也失败。请为该服务主体授予 Cost Management Reader / Billing Reader 权限。余额错误: {str(balance_exception)}；消费查询错误: {str(fallback_e)}"
+            else:
+                balance_info["message"] = f"当前订阅无法查询官方余额，且消费估算失败。请检查订阅类型与权限: {str(fallback_e)}"
+
+    return {
+        "subscription_id": subscription_id,
+        "subscription_name": subscription_name,
+        "subscription_state": subscription_state,
+        **balance_info
+    }
+
 def login_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
@@ -158,9 +310,9 @@ def get_vms():
         vm_list = []
         for vm in compute_client.virtual_machines.list_all():
             resource_group = vm.id.split('/')[4]
+            status, public_ip, ip_allocation_method = "Unknown", "N/A", None
             try:
                 instance_view = compute_client.virtual_machines.instance_view(resource_group, vm.name)
-                status, public_ip = "Unknown", "N/A"
                 power_state = next((s for s in instance_view.statuses if s.code.startswith('PowerState/')), None)
                 if power_state: status = power_state.display_status.replace("VM ", "")
             except ResourceNotFoundError:
@@ -172,9 +324,13 @@ def get_vms():
                     nic = network_client.network_interfaces.get(resource_group, nic_name)
                     if nic.ip_configurations and nic.ip_configurations[0].public_ip_address:
                         pip_id = nic.ip_configurations[0].public_ip_address.id; pip_name = pip_id.split('/')[-1]
-                        pip = network_client.public_ip_addresses.get(resource_group, pip_name); public_ip = pip.ip_address
-            except Exception: public_ip = "查询失败"
-            vm_list.append({"name": vm.name, "location": vm.location, "vm_size": vm.hardware_profile.vm_size, "status": status, "resource_group": resource_group, "public_ip": public_ip, "time_created": vm.time_created.isoformat() if vm.time_created else None})
+                        pip = network_client.public_ip_addresses.get(resource_group, pip_name)
+                        public_ip = pip.ip_address
+                        ip_allocation_method = getattr(pip, 'public_ip_allocation_method', None)
+            except Exception:
+                public_ip = "查询失败"
+                ip_allocation_method = None
+            vm_list.append({"name": vm.name, "location": vm.location, "vm_size": vm.hardware_profile.vm_size, "status": status, "resource_group": resource_group, "public_ip": public_ip, "ip_allocation_method": ip_allocation_method, "time_created": vm.time_created.isoformat() if vm.time_created else None})
         return jsonify(vm_list)
     except Exception as e: return jsonify({"error": str(e)}), 500
 
@@ -189,6 +345,21 @@ def get_regions():
         region_list = [{"name": loc.name, "display_name": loc.display_name} for loc in locations]
         return jsonify(region_list)
     except Exception as e: return jsonify({"error": f"获取区域列表失败: {str(e)}"}), 500
+
+@azure_bp.route('/api/subscription-summary')
+@login_required
+@azure_credentials_required
+def get_subscription_summary():
+    try:
+        credential = ClientSecretCredential(
+            tenant_id=g.azure_creds['tenant_id'],
+            client_id=g.azure_creds['client_id'],
+            client_secret=g.azure_creds['client_secret']
+        )
+        summary = _get_subscription_summary(credential, g.azure_creds['subscription_id'])
+        return jsonify(summary)
+    except Exception as e:
+        return jsonify({"error": f"获取订阅额度信息失败: {str(e)}"}), 500
 
 @azure_bp.route('/api/vm-action', methods=['POST'])
 @login_required
@@ -235,7 +406,7 @@ def change_vm_ip():
         rg_name=data.get('resource_group'),
         vm_name=vm_name
     )
-    return jsonify({"message": f"正在为虚拟机 {vm_name} 申请新的IP地址...", "task_id": task_id})
+    return jsonify({"message": f"正在为虚拟机 {vm_name} 申请新的动态IP地址...", "task_id": task_id})
 
 @azure_bp.route('/api/create-vm', methods=['POST'])
 @login_required
@@ -319,8 +490,8 @@ def _change_ip_task(task_id, credential_dict, subscription_id, rg_name, vm_name)
             network_client.public_ip_addresses.begin_delete(rg_name, old_pip_name).result()
 
         new_pip_name = f"pip-{vm_name}-{int(time.time())}"
-        pip_params = {"location": vm.location, "sku": {"name": "Standard"}, "public_ip_allocation_method": "Static"}
-        _db_update_task(task_id, 'running', '正在创建新IP...')
+        pip_params = {"location": vm.location, "sku": {"name": "Basic"}, "public_ip_allocation_method": "Dynamic"}
+        _db_update_task(task_id, 'running', '正在创建新的动态IP...')
         new_pip = network_client.public_ip_addresses.begin_create_or_update(rg_name, new_pip_name, pip_params).result()
         
         _db_update_task(task_id, 'running', '正在绑定新IP...')
@@ -340,7 +511,7 @@ def _change_ip_task(task_id, credential_dict, subscription_id, rg_name, vm_name)
                 network_client.network_security_groups.begin_create_or_update(rg_name, nsg_name, nsg).result()
                 _db_update_task(task_id, 'running', 'SSH规则创建成功！')
         
-        result_message = f"✅ IP更换成功！\n- 虚拟机: {vm_name}\n- 新IP地址: {new_pip.ip_address}\n- SSH(22)端口已确保开放。"
+        result_message = f"✅ 动态IP更换成功！\n- 虚拟机: {vm_name}\n- 新IP地址: {new_pip.ip_address}\n- SSH(22)端口已确保开放。"
         _db_update_task(task_id, 'success', result_message)
     except Exception as e:
         error_message = f"❌ 更换IP失败 for {vm_name}: {str(e)}"
