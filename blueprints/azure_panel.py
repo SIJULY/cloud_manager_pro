@@ -535,7 +535,17 @@ def _create_vm_task(task_id, credential_dict, subscription_id, vm_name, rg_name,
             "ubuntu22": {"publisher": "Canonical", "offer": "0001-com-ubuntu-server-jammy", "sku": "22_04-lts-gen2", "version": "latest"},
             "ubuntu20": {"publisher": "Canonical", "offer": "0001-com-ubuntu-server-focal", "sku": "20_04-lts-gen2", "version": "latest"},
         }
-        image_reference = os_images.get(data.get('os_image'))
+        os_image_key = (data.get('os_image') or '').strip()
+        os_image_aliases = {
+            "Ubuntu-2204": "ubuntu22",
+            "Ubuntu-2004": "ubuntu20",
+            "Debian-11": "debian11",
+            "Debian-12": "debian12"
+        }
+        normalized_os_image = os_image_aliases.get(os_image_key, os_image_key)
+        image_reference = os_images.get(normalized_os_image)
+        if not image_reference:
+            raise ValueError(f"不支持的操作系统镜像: {os_image_key}")
         admin_username = "azureuser"
 
         resource_client.resource_groups.create_or_update(rg_name, {"location": location})
@@ -559,8 +569,8 @@ def _create_vm_task(task_id, credential_dict, subscription_id, vm_name, rg_name,
         nic_poller = network_client.network_interfaces.begin_create_or_update(rg_name, f"nic-{vm_name}", {"location": location, "ip_configurations": [{"name": "ipconfig1", "subnet": {"id": subnet_id}, "public_ip_address": {"id": public_ip_id}}], "network_security_group": {"id": nsg_id}})
         nic_id = nic_poller.result().id
         
-        azure_params = {"location": location, "storage_profile": {"image_reference": image_reference, "os_disk": {"create_option": "FromImage", "disk_size_gb": data.get('disk_size')}}, "hardware_profile": {"vm_size": data.get('vm_size')}, "os_profile": {"computer_name": vm_name, "admin_username": admin_username, "admin_password": admin_password}, "network_profile": {"network_interfaces": [{"id": nic_id}]}}
-        
+        azure_params = {"location": location, "storage_profile": {"image_reference": image_reference, "os_disk": {"create_option": "FromImage"}}, "hardware_profile": {"vm_size": data.get('vm_size')}, "os_profile": {"computer_name": vm_name, "admin_username": admin_username, "admin_password": admin_password}, "network_profile": {"network_interfaces": [{"id": nic_id}]}}
+
         user_data_b64 = data.get('user_data')
         if user_data_b64:
             azure_params["os_profile"]["custom_data"] = user_data_b64
