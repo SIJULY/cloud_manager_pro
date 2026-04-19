@@ -43,6 +43,64 @@ document.addEventListener('DOMContentLoaded', function() {
     let vmSilentRefreshTimer = null;
     let lastVmSnapshot = '';
     let pendingIpChange = null;
+    let regionsLoadedForAccount = null;
+    let isLoadingRegions = false;
+    const fallbackRegions = [
+        { name: 'eastus', display_name: 'East US' },
+        { name: 'japaneast', display_name: 'Japan East' },
+        { name: 'southeastasia', display_name: 'Southeast Asia' },
+        { name: 'koreacentral', display_name: 'Korea Central' },
+        { name: 'eastasia', display_name: 'East Asia' }
+    ];
+
+    function renderRegionOptions(regions, { preferredRegion = '' } = {}) {
+        if (!UI.regionSelector) return;
+        const normalizedRegions = Array.isArray(regions) ? regions.filter(region => region && region.name) : [];
+        const selectedRegion = preferredRegion || UI.regionSelector.value || (normalizedRegions[0] && normalizedRegions[0].name) || '';
+
+        UI.regionSelector.innerHTML = '';
+        normalizedRegions.forEach(region => {
+            const option = document.createElement('option');
+            option.value = region.name;
+            option.textContent = `${region.display_name || region.name} (${region.name})`;
+            if (region.name === selectedRegion) option.selected = true;
+            UI.regionSelector.appendChild(option);
+        });
+
+        if (!normalizedRegions.length) {
+            UI.regionSelector.innerHTML = '<option value="">暂无可用区域</option>';
+        }
+    }
+
+    function setRegionLoadingState(message = '正在加载可用区域...') {
+        if (!UI.regionSelector) return;
+        UI.regionSelector.innerHTML = `<option value="">${message}</option>`;
+    }
+
+    async function loadRegions({ force = false, silent = false } = {}) {
+        if (!UI.regionSelector || !selectedAccount) return;
+        if (isLoadingRegions) return;
+        if (!force && regionsLoadedForAccount === selectedAccount.name && UI.regionSelector.options.length > 0) return;
+
+        const previousRegion = UI.regionSelector.value;
+        isLoadingRegions = true;
+        UI.regionSelector.disabled = true;
+        setRegionLoadingState('正在从 Azure 加载可用区域...');
+
+        try {
+            const regions = await apiCall('/azure/api/regions');
+            renderRegionOptions(regions, { preferredRegion: previousRegion });
+            regionsLoadedForAccount = selectedAccount.name;
+            if (!silent) log(`已加载 ${regions.length} 个 Azure 可用区域`, 'success');
+        } catch (err) {
+            renderRegionOptions(fallbackRegions, { preferredRegion: previousRegion || 'eastus' });
+            regionsLoadedForAccount = null;
+            log(`加载 Azure 区域失败，已回退到内置区域列表: ${err.message}`, 'error');
+        } finally {
+            UI.regionSelector.disabled = false;
+            isLoadingRegions = false;
+        }
+    }
 
     function log(message, type = 'info') {
         const timestamp = new Date().toLocaleTimeString();
@@ -279,7 +337,10 @@ document.addEventListener('DOMContentLoaded', function() {
             stopSilentVmRefresh();
             setChangeIpLoading(false);
             window.__azureLastSummaryRefreshAt = 0;
+            regionsLoadedForAccount = null;
             UI.currentAccountStatus.textContent = '未连接';
+            setRegionLoadingState('请先连接 Azure 账户');
+            if (UI.regionSelector) UI.regionSelector.disabled = true;
             if (UI.connectedProfileSubscriptionName) UI.connectedProfileSubscriptionName.textContent = '加载中 / 未查询';
             UI.connectedProfileEmptyState.classList.remove('d-none');
             UI.connectedProfileDetails.classList.add('d-none');
@@ -326,6 +387,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     window.__azureLastSummaryRefreshAt = Date.now();
                     startSilentVmRefresh();
                     loadSubscriptionName();
+                    loadRegions({ force: true });
                     loadVms();
                 });
 
@@ -354,6 +416,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         window.__azureLastSummaryRefreshAt = Date.now();
                         startSilentVmRefresh();
                         loadSubscriptionName({ silent: true });
+                        loadRegions({ silent: true });
                         loadVms({ silent: true });
                     }
                 }
@@ -512,10 +575,19 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
+    const createVmModalElement = document.getElementById('createVmModal');
+    if (createVmModalElement) {
+        createVmModalElement.addEventListener('show.bs.modal', () => {
+            if (!selectedAccount) return;
+            loadRegions({ force: true, silent: true });
+        });
+    }
+
     if (UI.createVmBtn) {
         UI.createVmBtn.addEventListener('click', async () => {
             if (!selectedAccount) return log('错误：未连接账户，无法创建', 'error');
             const region = UI.regionSelector.value;
+            if (!region) return log('错误：当前没有可用区域，请稍后重试', 'error');
             const vmSize = document.getElementById('vmSize').value;
             const vmOs = document.getElementById('vmOs').value;
             const diskSize = document.getElementById('vmDiskSize').value;
@@ -568,6 +640,9 @@ document.addEventListener('DOMContentLoaded', function() {
             loadSubscriptionName({ silent: true });
         }
     });
+
+    setRegionLoadingState('请先连接 Azure 账户');
+    if (UI.regionSelector) UI.regionSelector.disabled = true;
 
     loadAccounts();
 });
