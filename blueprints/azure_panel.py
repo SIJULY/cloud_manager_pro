@@ -86,6 +86,31 @@ def generate_password(length=12):
     characters = string.ascii_letters + string.digits + "!@#$%^&*()"
     return ''.join(random.choice(characters) for i in range(length))
 
+def _normalize_os_image_key(os_image_key):
+    os_image_key = (os_image_key or '').strip()
+    os_image_aliases = {
+        "Ubuntu-2204": "ubuntu22",
+        "Ubuntu-2004": "ubuntu20",
+        "Debian-11": "debian11",
+        "Debian-12": "debian12"
+    }
+    return os_image_aliases.get(os_image_key, os_image_key)
+
+
+def _get_os_image_reference(os_image_key):
+    os_images = {
+        "debian12": {"publisher": "Debian", "offer": "debian-12", "sku": "12-gen2", "version": "latest"},
+        "debian11": {"publisher": "Debian", "offer": "debian-11", "sku": "11-gen2", "version": "latest"},
+        "ubuntu22": {"publisher": "Canonical", "offer": "0001-com-ubuntu-server-jammy", "sku": "22_04-lts-gen2", "version": "latest"},
+        "ubuntu20": {"publisher": "Canonical", "offer": "0001-com-ubuntu-server-focal", "sku": "20_04-lts-gen2", "version": "latest"},
+    }
+    normalized_os_image = _normalize_os_image_key(os_image_key)
+    image_reference = os_images.get(normalized_os_image)
+    if not image_reference:
+        raise ValueError(f"不支持的操作系统镜像: {os_image_key}")
+    return image_reference
+
+
 def _azure_management_get(access_token, url, params=None, timeout=20):
     response = requests.get(
         url,
@@ -529,23 +554,8 @@ def _create_vm_task(task_id, credential_dict, subscription_id, vm_name, rg_name,
 
         location = data.get('region')
         ip_type = data.get('ip_type')
-        os_images = {
-            "debian12": {"publisher": "Debian", "offer": "debian-12", "sku": "12-gen2", "version": "latest"},
-            "debian11": {"publisher": "Debian", "offer": "debian-11", "sku": "11-gen2", "version": "latest"},
-            "ubuntu22": {"publisher": "Canonical", "offer": "0001-com-ubuntu-server-jammy", "sku": "22_04-lts-gen2", "version": "latest"},
-            "ubuntu20": {"publisher": "Canonical", "offer": "0001-com-ubuntu-server-focal", "sku": "20_04-lts-gen2", "version": "latest"},
-        }
         os_image_key = (data.get('os_image') or '').strip()
-        os_image_aliases = {
-            "Ubuntu-2204": "ubuntu22",
-            "Ubuntu-2004": "ubuntu20",
-            "Debian-11": "debian11",
-            "Debian-12": "debian12"
-        }
-        normalized_os_image = os_image_aliases.get(os_image_key, os_image_key)
-        image_reference = os_images.get(normalized_os_image)
-        if not image_reference:
-            raise ValueError(f"不支持的操作系统镜像: {os_image_key}")
+        image_reference = _get_os_image_reference(os_image_key)
         admin_username = "azureuser"
 
         resource_client.resource_groups.create_or_update(rg_name, {"location": location})
