@@ -255,12 +255,8 @@
                     <div class="row">
                         <div class="col-md-6 mb-3">
                             <label class="form-label">选择区域</label>
-                            <select class="form-select" id="regionSelector">
-                                <option value="eastus">East US (美国东部)</option>
-                                <option value="japaneast">Japan East (日本东部)</option>
-                                <option value="southeastasia">Southeast Asia (新加坡)</option>
-                                <option value="koreacentral">Korea Central (韩国中部)</option>
-                                <option value="eastasia">East Asia (香港)</option>
+                            <select class="form-select" id="regionSelector" disabled>
+                                <option value="">请先连接 Azure 账户</option>
                             </select>
                         </div>
                         <div class="col-md-6 mb-3">
@@ -309,5 +305,5 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="{{ url_for('static', filename='js/azure_script.js', v='2026041003') }}"></script>
+<script src="{{ url_for('static', filename='js/azure_script.js', v='2026041007') }}"></script>
 {% endblock %}
