@@ -31,6 +31,65 @@ document.addEventListener('DOMContentLoaded', function() {
     const addAccountModal = new bootstrap.Modal(document.getElementById('addAccountModal'));
     const profilesHubModalEl = document.getElementById('profilesHubModal');
 
+    function showCopyableCommandModal({ title, message, command }) {
+        let modalEl = document.getElementById('copyCommandModal');
+        if (!modalEl) {
+            document.body.insertAdjacentHTML('beforeend', `
+                <div class="modal fade" id="copyCommandModal" tabindex="-1" aria-hidden="true">
+                    <div class="modal-dialog modal-lg modal-dialog-centered">
+                        <div class="modal-content bg-dark text-light border-secondary">
+                            <div class="modal-header border-secondary">
+                                <h5 class="modal-title" id="copyCommandModalLabel">命令复制</h5>
+                                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                            </div>
+                            <div class="modal-body">
+                                <p class="small text-warning mb-2" id="copyCommandModalMessage"></p>
+                                <textarea class="form-control font-monospace" id="copyCommandModalTextarea" rows="11" readonly></textarea>
+                                <div class="form-text text-light-emphasis mt-2">点击下方按钮可一键复制，然后直接到 VPS 粘贴执行。</div>
+                            </div>
+                            <div class="modal-footer border-secondary">
+                                <button type="button" class="btn btn-outline-light" id="copyCommandModalCopyBtn">复制命令</button>
+                                <button type="button" class="btn btn-primary" data-bs-dismiss="modal">关闭</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `);
+            modalEl = document.getElementById('copyCommandModal');
+        }
+
+        const modalTitle = modalEl.querySelector('.modal-title');
+        const modalMessage = document.getElementById('copyCommandModalMessage');
+        const textarea = document.getElementById('copyCommandModalTextarea');
+        const copyBtn = document.getElementById('copyCommandModalCopyBtn');
+        const modal = new bootstrap.Modal(modalEl);
+
+        modalTitle.textContent = title || '命令复制';
+        modalMessage.textContent = message || '';
+        textarea.value = command || '';
+        copyBtn.textContent = '复制命令';
+
+        copyBtn.onclick = async () => {
+            try {
+                await navigator.clipboard.writeText(textarea.value);
+                copyBtn.textContent = '已复制';
+                addLog('命令已复制到剪贴板，请登录 VPS 粘贴执行。', 'success');
+            } catch (error) {
+                textarea.focus();
+                textarea.select();
+                document.execCommand('copy');
+                copyBtn.textContent = '已复制';
+                addLog('命令已复制到剪贴板，请登录 VPS 粘贴执行。', 'success');
+            }
+        };
+
+        modal.show();
+        setTimeout(() => {
+            textarea.focus();
+            textarea.select();
+        }, 200);
+    }
+
     // 刷新添加账户窗口中的全局公钥状态文字
     async function loadAndDisplayDefaultKey() {
         const statusText = document.getElementById('defaultSshKeyStatusText');
@@ -1947,9 +2006,12 @@ document.addEventListener('DOMContentLoaded', function() {
                         body: JSON.stringify({ instance_id: selectedInstance.id })
                     });
                     addLog(`IP 附加成功! 新公网IP: ${response.public_ip}`, 'success');
-                    alert(`✅ IP 附加成功！\n\n公网 IP: ${response.public_ip}\n内网 IP: ${response.private_ip}\n\n⚠️ 请务必登录 VPS 执行以下命令以启用新 IP:\n\n${response.cmd_hint}`);
-                    addLog(`📋 请在 VPS 执行: ${response.cmd_hint}`, 'info');
-                    
+                    showCopyableCommandModal({
+                        title: '附加 IP 成功',
+                        message: `公网 IP: ${response.public_ip} ｜ 内网 IP: ${response.private_ip}`,
+                        command: response.cmd_hint
+                    });
+
                     // 使用无感静默刷新
                     setTimeout(() => refreshInstances(true), 2000);
                 } catch (e) {}
@@ -1974,18 +2036,35 @@ document.addEventListener('DOMContentLoaded', function() {
         confirmActionModal.show();
     }
 
-    async function deleteSecondaryIp(ipId, ipAddr) {
-        if(!confirm(`确定要删除辅助 IP ${ipAddr} 吗？\n\n1. 此操作将立即从云端移除该私有 IP。\n2. 您可能还需要手动从 VPS 配置文件中删除它，以免网络报错。`)) {
+    async function deleteSecondaryIp(ipId, ipAddr, isOrphanReservedPublicIp = false) {
+        const confirmMessage = isOrphanReservedPublicIp
+            ? `确定要删除遗留 Reserved Public IP ${ipAddr} 吗？
+
+1. 此操作将直接释放这个残留公网 IP 资源。
+2. 删除后它将不再占用 reserved-public-ip-count 配额。`
+            : `确定要删除辅助 IP ${ipAddr} 吗？
+
+1. 此操作将立即从云端移除该私有 IP。
+2. 如果此 IP 绑定了 Reserved Public IP，系统会一并删除，避免继续占用配额。
+3. 您可能还需要手动从 VPS 配置文件中删除它，以免网络报错。`;
+        if(!confirm(confirmMessage)) {
             return;
         }
-        addLog(`正在删除辅助 IP ${ipAddr}...`);
+        addLog(isOrphanReservedPublicIp ? `正在删除遗留 Reserved Public IP ${ipAddr}...` : `正在删除辅助 IP ${ipAddr}...`);
         try {
             const response = await apiRequest('/oci/api/instance/delete-secondary-ip', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ private_ip_id: ipId })
+                body: JSON.stringify(isOrphanReservedPublicIp ? { public_ip_id: ipId } : { private_ip_id: ipId })
             });
             addLog(response.message, 'success');
+            if (!isOrphanReservedPublicIp && response.cleanup_cmd) {
+                showCopyableCommandModal({
+                    title: '请清理 VPS 网络配置',
+                    message: `辅助 IP ${response.cleanup_ip || ipAddr} 已从 OCI 删除。请复制以下命令到 VPS 执行，清理系统内残留配置。`,
+                    command: response.cleanup_cmd
+                });
+            }
             editInstanceModal.hide();
             
             // 使用无感静默刷新
@@ -2035,17 +2114,19 @@ document.addEventListener('DOMContentLoaded', function() {
             if (details.ips && details.ips.length > 0) {
                 details.ips.forEach(ip => {
                     const isPrimary = ip.is_primary;
+                    const isOrphanReservedPublicIp = !!ip.is_orphan_reserved_public_ip;
+                    const displayAddr = isOrphanReservedPublicIp ? (ip.public_ip || '未知公网IP') : ip.private_ip;
                     const deleteBtn = isPrimary ?
                         '<span class="text-muted small" style="cursor: not-allowed;" title="主 IP 不可删除">-</span>' :
-                        `<button class="btn btn-sm btn-outline-danger delete-ip-btn" data-ip-id="${ip.id}" data-ip-addr="${ip.private_ip}" title="删除此辅助 IP"><i class="bi bi-trash"></i></button>`;
+                        `<button class="btn btn-sm btn-outline-danger delete-ip-btn" data-ip-id="${ip.id}" data-ip-addr="${displayAddr}" data-ip-kind="${isOrphanReservedPublicIp ? 'orphan-public' : 'private'}" title="${isOrphanReservedPublicIp ? '删除此遗留 Reserved Public IP' : '删除此辅助 IP'}"><i class="bi bi-trash"></i></button>`;
 
                     const typeBadge = isPrimary ?
                         '<span class="badge bg-primary">主IP</span>' :
-                        '<span class="badge bg-secondary">辅助</span>';
+                        (isOrphanReservedPublicIp ? '<span class="badge bg-warning text-dark">遗留公网IP</span>' : '<span class="badge bg-secondary">辅助</span>');
 
                     const checkboxHtml = isPrimary ?
                         '<input type="checkbox" class="form-check-input" disabled>' :
-                        `<input type="checkbox" class="form-check-input ipv4-select" data-id="${ip.id}" data-addr="${ip.private_ip}">`;
+                        `<input type="checkbox" class="form-check-input ipv4-select" data-id="${ip.id}" data-addr="${displayAddr}" data-kind="${isOrphanReservedPublicIp ? 'orphan-public' : 'private'}">`;
 
                     const row = `
                         <tr>
@@ -2061,25 +2142,21 @@ document.addEventListener('DOMContentLoaded', function() {
 
                 document.querySelectorAll('.delete-ip-btn').forEach(btn => {
                     btn.addEventListener('click', function() {
-                        deleteSecondaryIp(this.dataset.ipId, this.dataset.ipAddr);
+                        deleteSecondaryIp(this.dataset.ipId, this.dataset.ipAddr, this.dataset.ipKind === 'orphan-public');
                     });
                 });
             } else {
-                editInstanceIpList.innerHTML = '<tr><td colspan="5" class="text-center text-muted">未找到 IP 信息</td></tr>';
+                editInstanceIpList.innerHTML = '<tr><td colspan="5" class="text-center text-muted">无 IPv4 地址</td></tr>';
             }
 
             editInstanceIpv6List.innerHTML = '';
             if (details.ipv6s && details.ipv6s.length > 0) {
                 details.ipv6s.forEach(ip => {
-                    const checkboxHtml = `<input type="checkbox" class="form-check-input ipv6-select" data-id="${ip.id}" data-addr="${ip.ip_address}">`;
-
                     const row = `
                         <tr>
-                            <td>${checkboxHtml}</td>
+                            <td><input type="checkbox" class="form-check-input ipv6-select" data-id="${ip.id}" data-addr="${ip.ip_address}"></td>
                             <td>${ip.ip_address}</td>
-                            <td class="text-end">
-                                <button class="btn btn-sm btn-outline-danger delete-ipv6-btn" data-ipv6-id="${ip.id}" data-ipv6-addr="${ip.ip_address}" title="删除此 IPv6"><i class="bi bi-trash"></i></button>
-                            </td>
+                            <td class="text-end"><button class="btn btn-sm btn-outline-danger delete-ipv6-btn" data-id="${ip.id}" data-addr="${ip.ip_address}"><i class="bi bi-trash"></i></button></td>
                         </tr>
                     `;
                     editInstanceIpv6List.insertAdjacentHTML('beforeend', row);
@@ -2087,25 +2164,51 @@ document.addEventListener('DOMContentLoaded', function() {
 
                 document.querySelectorAll('.delete-ipv6-btn').forEach(btn => {
                     btn.addEventListener('click', function() {
-                        deleteIpv6(this.dataset.ipv6Id, this.dataset.ipv6Addr);
+                        deleteIpv6(this.dataset.id, this.dataset.addr);
                     });
                 });
             } else {
-                editInstanceIpv6List.innerHTML = '<tr><td colspan="3" class="text-center text-muted">未找到 IPv6 信息</td></tr>';
+                editInstanceIpv6List.innerHTML = '<tr><td colspan="3" class="text-center text-muted">无 IPv6 地址</td></tr>';
             }
 
             const selectAllIpv4 = document.getElementById('selectAllIpv4');
             const selectAllIpv6 = document.getElementById('selectAllIpv6');
+            const batchDeleteIpBtn = document.getElementById('batchDeleteIpBtn');
+            const batchDeleteIpv6Btn = document.getElementById('batchDeleteIpv6Btn');
+
             if (selectAllIpv4) {
                 selectAllIpv4.checked = false;
                 selectAllIpv4.onchange = (e) => {
                     document.querySelectorAll('.ipv4-select').forEach(cb => cb.checked = e.target.checked);
                 };
             }
+
             if (selectAllIpv6) {
                 selectAllIpv6.checked = false;
                 selectAllIpv6.onchange = (e) => {
                     document.querySelectorAll('.ipv6-select').forEach(cb => cb.checked = e.target.checked);
+                };
+            }
+
+            if (batchDeleteIpBtn) {
+                batchDeleteIpBtn.onclick = async () => {
+                    const checked = Array.from(document.querySelectorAll('.ipv4-select:checked'));
+                    if (checked.length === 0) return addLog('请先勾选要删除的辅助 IP', 'warning');
+                    if (!confirm(`确定要批量删除选中的 ${checked.length} 个辅助 IP / 遗留公网 IP 吗？`)) return;
+                    for (const cb of checked) {
+                        await deleteSecondaryIp(cb.dataset.id, cb.dataset.addr, cb.dataset.kind === 'orphan-public').catch(() => {});
+                    }
+                };
+            }
+
+            if (batchDeleteIpv6Btn) {
+                batchDeleteIpv6Btn.onclick = async () => {
+                    const checked = Array.from(document.querySelectorAll('.ipv6-select:checked'));
+                    if (checked.length === 0) return addLog('请先勾选要删除的 IPv6 地址', 'warning');
+                    if (!confirm(`确定要批量删除选中的 ${checked.length} 个 IPv6 地址吗？`)) return;
+                    for (const cb of checked) {
+                        await deleteIpv6(cb.dataset.id, cb.dataset.addr).catch(() => {});
+                    }
                 };
             }
 
@@ -2117,542 +2220,47 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
-    document.getElementById('batchDeleteIpBtn')?.addEventListener('click', async () => {
-        const checked = Array.from(document.querySelectorAll('.ipv4-select:checked'));
-        if (checked.length === 0) return addLog('请先勾选要删除的辅助 IP', 'warning');
-        if (!confirm(`确定要批量删除选中的 ${checked.length} 个辅助 IP 吗？`)) return;
-        for (const cb of checked) {
-            await deleteSecondaryIp(cb.dataset.id, cb.dataset.addr).catch(() => {});
-        }
-    });
-
-    document.getElementById('batchDeleteIpv6Btn')?.addEventListener('click', async () => {
-        const checked = Array.from(document.querySelectorAll('.ipv6-select:checked'));
-        if (checked.length === 0) return addLog('请先勾选要删除的 IPv6 地址', 'warning');
-        if (!confirm(`确定要批量删除选中的 ${checked.length} 个 IPv6 地址吗？`)) return;
-        for (const cb of checked) {
-            await deleteIpv6(cb.dataset.id, cb.dataset.addr).catch(() => {});
-        }
-    });
-
-    async function handleInstanceUpdateRequest(action, payload) {
-        addLog(`正在提交 ${action} 请求...`);
-        try {
-            const response = await apiRequest('/oci/api/update-instance', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-            addLog(response.message, 'success');
-            if (response.task_id) pollTaskStatus(response.task_id);
-            editInstanceModal.hide();
-            
-            // 使用无感静默刷新
-            setTimeout(() => refreshInstances(true), 3000);
-        } catch(e) {}
-    }
-
-    saveDisplayNameBtn.addEventListener('click', () => handleInstanceUpdateRequest('修改名称', { action: 'update_display_name', instance_id: selectedInstance.id, display_name: editDisplayName.value }));
-    saveFlexConfigBtn.addEventListener('click', () => handleInstanceUpdateRequest('修改CPU/内存', { action: 'update_shape', instance_id: selectedInstance.id, ocpus: parseInt(editOcpus.value, 10), memory_in_gbs: parseInt(editMemory.value, 10) }));
-    saveBootVolumeSizeBtn.addEventListener('click', () => handleInstanceUpdateRequest('修改引导卷大小', { action: 'update_boot_volume', instance_id: selectedInstance.id, size_in_gbs: parseInt(editBootVolumeSize.value, 10) }));
-    saveVpusBtn.addEventListener('click', () => handleInstanceUpdateRequest('修改引导卷性能', { action: 'update_boot_volume', instance_id: selectedInstance.id, vpus_per_gb: parseInt(editVpus.value, 10) }));
-
-    let allNetworkResources = [];
-
-    async function loadSecurityListRules(securityListId) {
-        if (!securityListId) {
-            renderRules('ingress', []);
-            renderRules('egress', []);
+    async function submitInstanceUpdate(payload, pendingMessage) {
+        if (!selectedInstance) {
+            addLog('请先选择一个实例', 'warning');
             return;
         }
-
-        networkRulesSpinner.classList.remove('d-none');
-        saveNetworkRulesBtn.disabled = true;
+        addLog(pendingMessage, 'info');
         try {
-            const slDetails = await apiRequest(`/oci/api/network/security-list/${securityListId}`);
-            currentSecurityList = slDetails;
-            renderRules('ingress', slDetails.ingress_security_rules);
-            renderRules('egress', slDetails.egress_security_rules);
-        } catch (error) {
-            addLog(`加载安全列表 ${securityListId} 规则失败`, 'error');
-            renderRules('ingress', []);
-            renderRules('egress', []);
-        } finally {
-            networkRulesSpinner.classList.add('d-none');
-            saveNetworkRulesBtn.disabled = false;
-        }
-    }
-
-    vcnSelect.addEventListener('change', () => {
-        const selectedVcnId = vcnSelect.value;
-        const vcnData = allNetworkResources.find(v => v.vcn_id === selectedVcnId);
-
-        securityListSelect.innerHTML = '';
-        if (vcnData && vcnData.security_lists.length > 0) {
-            vcnData.security_lists.forEach(sl => {
-                const option = new Option(sl.display_name, sl.id);
-                securityListSelect.add(option);
-            });
-            securityListSelect.disabled = false;
-            securityListSelect.dispatchEvent(new Event('change'));
-        } else {
-            securityListSelect.innerHTML = '<option value="">无安全列表</option>';
-            securityListSelect.disabled = true;
-            loadSecurityListRules(null);
-        }
-    });
-
-    securityListSelect.addEventListener('change', () => {
-        const selectedSlId = securityListSelect.value;
-        loadSecurityListRules(selectedSlId);
-    });
-
-    document.getElementById('networkSettingsHubBtn')?.addEventListener('click', () => {
-        networkConfigHubModal.hide();
-        setTimeout(() => networkSettingsModal.show(), 200);
-    });
-
-    document.getElementById('cloudflareSettingsBtn')?.addEventListener('click', async () => {
-        networkConfigHubModal.hide();
-        await loadCloudflareConfig();
-        setTimeout(() => cloudflareSettingsModal.show(), 200);
-    });
-
-    document.getElementById('tgSettingsBtn')?.addEventListener('click', async () => {
-        networkConfigHubModal.hide();
-        await loadTgConfig();
-        await loadXuiConfig();
-        setTimeout(() => tgSettingsModal.show(), 200);
-    });
-
-    networkSettingsBtn.addEventListener('click', async () => {
-        vcnSelect.innerHTML = '<option value="">正在加载 VCN...</option>';
-        securityListSelect.innerHTML = '<option value="">请先选择VCN</option>';
-        vcnSelect.disabled = true;
-        securityListSelect.disabled = true;
-        renderRules('ingress', []);
-        renderRules('egress', []);
-        networkRulesSpinner.classList.remove('d-none');
-
-        try {
-            addLog("正在获取所有网络资源...");
-            allNetworkResources = await apiRequest('/oci/api/network/resources');
-            networkRulesSpinner.classList.add('d-none');
-
-            if (allNetworkResources.length === 0) {
-                vcnSelect.innerHTML = '<option value="">未找到VCN</option>';
-                return;
-            }
-
-            vcnSelect.innerHTML = '';
-            allNetworkResources.forEach(vcn => {
-                const option = new Option(vcn.vcn_name, vcn.vcn_id);
-                vcnSelect.add(option);
-            });
-            vcnSelect.disabled = false;
-
-            vcnSelect.dispatchEvent(new Event('change'));
-
-        } catch (error) {
-            networkRulesSpinner.classList.add('d-none');
-            vcnSelect.innerHTML = '<option value="">加载失败</option>';
-            addLog('获取网络资源列表失败。', 'error');
-        }
-    });
-
-    function renderRules(type, rules) {
-        const tableBody = type === 'ingress' ? ingressRulesTable : egressRulesTable;
-        tableBody.innerHTML = !rules || rules.length === 0
-            ? `<tr><td colspan="5" class="text-center text-muted">没有规则</td></tr>`
-            : rules.map(rule => createRuleRow(type, rule).outerHTML).join('');
-        tableBody.querySelectorAll('.remove-rule-btn').forEach(btn => btn.onclick = () => btn.closest('tr').remove());
-    }
-
-    function createRuleRow(type, rule = {}) {
-        const tr = document.createElement('tr');
-        tr.className = 'rule-row';
-        const sourceOrDest = type === 'ingress' ? (rule.source || '0.0.0.0/0') : (rule.destination || '0.0.0.0/0');
-        const protocol = rule.protocol || '6';
-        const protocolOptions = {'all': '所有', '1': 'ICMP', '6': 'TCP', '17': 'UDP'};
-        const portRange = (options) => ({ min: options?.min || '', max: options?.max || '' });
-
-        const destPorts = portRange(rule.tcp_options ? rule.tcp_options.destination_port_range : (rule.udp_options ? rule.udp_options.destination_port_range : null));
-
-        tr.innerHTML = `
-            <td><input class="form-check-input" type="checkbox" data-key="is_stateless" ${rule.is_stateless ? 'checked' : ''}></td>
-            <td><input type="text" class="form-control form-control-sm" data-key="${type === 'ingress' ? 'source' : 'destination'}" value="${sourceOrDest}"></td>
-            <td><select class="form-select form-select-sm" data-key="protocol">${Object.entries(protocolOptions).map(([k, v]) => `<option value="${k}" ${protocol == k ? 'selected' : ''}>${v}</option>`).join('')}</select></td>
-            <td><div class="input-group input-group-sm"><input type="number" class="form-control" placeholder="Min" data-key="dest_port_min" value="${destPorts.min}"><input type="number" class="form-control" placeholder="Max" data-key="dest_port_max" value="${destPorts.max}"></div></td>
-            <td><button class="btn btn-sm btn-danger remove-rule-btn"><i class="bi bi-trash"></i></button></td>`;
-        return tr;
-    }
-
-    addIngressRuleBtn?.addEventListener('click', () => {
-        const placeholder = ingressRulesTable.querySelector('td[colspan="5"]');
-        if (placeholder) placeholder.parentElement.remove();
-        const newRow = createRuleRow('ingress');
-        ingressRulesTable.appendChild(newRow);
-        newRow.querySelector('.remove-rule-btn').onclick = () => newRow.remove();
-    });
-
-    addEgressRuleBtn?.addEventListener('click', () => {
-        const placeholder = egressRulesTable.querySelector('td[colspan="5"]');
-        if (placeholder) placeholder.parentElement.remove();
-        const newRow = createRuleRow('egress');
-        egressRulesTable.appendChild(newRow);
-        newRow.querySelector('.remove-rule-btn').onclick = () => newRow.remove();
-    });
-
-    openFirewallBtn.addEventListener('click', () => {
-        let ingressAdded = false;
-        let egressAdded = false;
-
-        const currentIngressRules = collectRulesFromTable(ingressRulesTable, 'ingress');
-        const ingressExists = currentIngressRules.some(rule => rule.protocol === 'all' && rule.source === '0.0.0.0/0');
-
-        if (!ingressExists) {
-            const allowAllIngressRule = { source: '0.0.0.0/0', protocol: 'all', is_stateless: false };
-            const ingressPlaceholder = ingressRulesTable.querySelector('td[colspan="5"]');
-            if (ingressPlaceholder) ingressPlaceholder.parentElement.remove();
-            ingressRulesTable.appendChild(createRuleRow('ingress', allowAllIngressRule));
-            ingressAdded = true;
-        }
-
-        const currentEgressRules = collectRulesFromTable(egressRulesTable, 'egress');
-        const egressExists = currentEgressRules.some(rule => rule.protocol === 'all' && rule.destination === '0.0.0.0/0');
-
-        if (!egressExists) {
-            const allowAllEgressRule = { destination: '0.0.0.0/0', protocol: 'all', is_stateless: false };
-            const egressPlaceholder = egressRulesTable.querySelector('td[colspan="5"]');
-            if (egressPlaceholder) egressPlaceholder.parentElement.remove();
-            egressRulesTable.appendChild(createRuleRow('egress', allowAllEgressRule));
-            egressAdded = true;
-        }
-
-        if (ingressAdded || egressAdded) {
-            addLog(`已添加 "允许所有" 的${(ingressAdded && egressAdded) ? '出入站规则' : (ingressAdded ? '入站规则' : '出站规则')}，请点击 "保存更改" 以生效。`, 'warning');
-        } else {
-            addLog('无需操作，允许所有的出入站规则均已存在。', 'info');
-        }
-    });
-
-    function collectRulesFromTable(tableBody, type) {
-        return Array.from(tableBody.querySelectorAll('.rule-row')).map(tr => {
-            const rule = { is_stateless: tr.querySelector('[data-key="is_stateless"]').checked, protocol: tr.querySelector('[data-key="protocol"]').value };
-            rule[type === 'ingress' ? 'source' : 'destination'] = tr.querySelector(`[data-key="${type === 'ingress' ? 'source' : 'destination'}"]`).value;
-            rule[`${type === 'ingress' ? 'source' : 'destination'}_type`] = 'CIDR_BLOCK';
-
-            if (['6', '17'].includes(rule.protocol)) {
-                let dest_min = parseInt(tr.querySelector('[data-key="dest_port_min"]').value, 10);
-                let dest_max = parseInt(tr.querySelector('[data-key="dest_port_max"]').value, 10);
-
-                if (!isNaN(dest_min) && isNaN(dest_max)) dest_max = dest_min;
-                if (isNaN(dest_min) && !isNaN(dest_max)) dest_min = dest_max;
-
-                const options = {};
-                if (!isNaN(dest_min) && !isNaN(dest_max)) {
-                    options.destination_port_range = { min: dest_min, max: dest_max };
-                }
-
-                if (rule.protocol === '6') rule.tcp_options = options;
-                else rule.udp_options = options;
-            }
-            return rule;
-        });
-    }
-
-    saveNetworkRulesBtn.addEventListener('click', async () => {
-        const slId = securityListSelect.value;
-        if (!slId) return addLog('请先选择一个安全列表', 'warning');
-
-        const ingressRules = collectRulesFromTable(ingressRulesTable, 'ingress');
-        const egressRules = collectRulesFromTable(egressRulesTable, 'egress');
-
-        saveNetworkRulesBtn.disabled = true;
-        const spinner = saveNetworkRulesBtn.querySelector('.spinner-border');
-        if (spinner) spinner.classList.remove('d-none');
-
-        try {
-            const response = await apiRequest('/oci/api/network/update-security-rules', {
+            const response = await apiRequest('/oci/api/update-instance', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    security_list_id: slId,
-                    rules: {
-                        ingress_security_rules: ingressRules,
-                        egress_security_rules: egressRules
-                    }
-                })
+                body: JSON.stringify({ instance_id: selectedInstance.id, ...payload })
             });
-            addLog(response.message || '安全列表更新成功。', 'success');
-            await loadSecurityListRules(slId);
-        } catch (error) {
-            addLog(`更新安全列表失败: ${error.message}`, 'error');
-        } finally {
-            saveNetworkRulesBtn.disabled = false;
-            if (spinner) spinner.classList.add('d-none');
-        }
+            addLog(response.message, 'success');
+            if (response.task_id) pollTaskStatus(response.task_id);
+        } catch (error) {}
+    }
+
+    saveDisplayNameBtn?.addEventListener('click', async () => {
+        const displayName = editDisplayName.value.trim();
+        if (!displayName) return addLog('实例名称不能为空', 'warning');
+        await submitInstanceUpdate({ action: 'update_display_name', display_name: displayName }, `正在更新实例 ${selectedInstance?.display_name || ''} 的名称...`);
     });
 
-    let aliasSortAsc = true;
-    if (sortAccountByAliasHeader) {
-        sortAccountByAliasHeader.addEventListener('click', () => {
-            const rows = Array.from(profileList.querySelectorAll('tr[data-alias]'));
-            rows.sort((a, b) => {
-                const aliasA = a.dataset.alias || '';
-                const aliasB = b.dataset.alias || '';
-                return aliasSortAsc ? aliasA.localeCompare(aliasB, 'zh-CN') : aliasB.localeCompare(aliasA, 'zh-CN');
-            });
-            rows.forEach(row => profileList.appendChild(row));
-            aliasSortAsc = !aliasSortAsc;
-            if (sortAliasIcon) sortAliasIcon.className = aliasSortAsc ? 'bi bi-arrow-up text-primary' : 'bi bi-arrow-down text-primary';
+    saveFlexConfigBtn?.addEventListener('click', async () => {
+        const ocpus = parseFloat(editOcpus.value);
+        const memory_in_gbs = parseFloat(editMemory.value);
+        if (!ocpus || !memory_in_gbs) return addLog('请填写有效的 OCPU 和内存值', 'warning');
+        await submitInstanceUpdate({ action: 'update_shape', ocpus, memory_in_gbs }, `正在更新实例 ${selectedInstance?.display_name || ''} 的 CPU/内存配置...`);
+    });
 
-            const order = Array.from(profileList.children).map(tr => tr.dataset.alias);
-            localStorage.setItem('oci_profiles_order', JSON.stringify(order));
-        });
-    }
+    saveBootVolumeSizeBtn?.addEventListener('click', async () => {
+        const size_in_gbs = parseInt(editBootVolumeSize.value, 10);
+        if (!size_in_gbs || size_in_gbs < 50) return addLog('引导卷大小必须大于等于 50 GB', 'warning');
+        await submitInstanceUpdate({ action: 'update_boot_volume', size_in_gbs }, `正在更新实例 ${selectedInstance?.display_name || ''} 的引导卷大小...`);
+    });
 
-    let dateSortAsc = true;
-    if (sortAccountByDateHeader) {
-        sortAccountByDateHeader.addEventListener('click', () => {
-            const rows = Array.from(profileList.querySelectorAll('tr[data-alias]'));
-            rows.sort((a, b) => {
-                const dateA = a.dataset.regDate ? new Date(a.dataset.regDate).getTime() : 0;
-                const dateB = b.dataset.regDate ? new Date(b.dataset.regDate).getTime() : 0;
-                return dateSortAsc ? dateA - dateB : dateB - dateA;
-            });
-            rows.forEach(row => profileList.appendChild(row));
-            dateSortAsc = !dateSortAsc;
-            if (sortIcon) sortIcon.className = dateSortAsc ? 'bi bi-arrow-up text-primary' : 'bi bi-arrow-down text-primary';
-
-            const order = Array.from(profileList.children).map(tr => tr.dataset.alias);
-            localStorage.setItem('oci_profiles_order', JSON.stringify(order));
-        });
-    }
-
-    window.addSnatchLog = addSnatchLog;
-    window.pollTaskStatus = pollTaskStatus;
-    window.loadSnatchTasks = loadSnatchTasks;
-
-
-    // ==========================================
-    // ✨✨✨ 新增：IAM 身份与用户管理逻辑 ✨✨✨
-    // ==========================================
-    const manageUsersBtn = document.getElementById('manageUsersBtn');
-    const userManagementModalEl = document.getElementById('userManagementModal');
-    const iamUsersList = document.getElementById('iamUsersList');
-    const refreshUsersBtn = document.getElementById('refreshUsersBtn');
-    
-    // UI 控制
-    const showCreateUserBtn = document.getElementById('showCreateUserBtn');
-    const createUserFormArea = document.getElementById('createUserFormArea');
-    const submitCreateUserBtn = document.getElementById('submitCreateUserBtn');
-
-    // 1. 登录会话联动按钮状态
-    // 在原本的 enableMainControls 函数中其实不用改，因为我们用的是 disabled 属性，
-    // 我们在这里监听连接成功后手动激活它
-    const originalEnableMainControls = enableMainControls;
-    enableMainControls = function(enabled, canCreate) {
-        originalEnableMainControls(enabled, canCreate);
-        if (manageUsersBtn) manageUsersBtn.disabled = !enabled;
-    };
-
-    // 2. 加载用户列表
-    async function loadIamUsers() {
-        if (!iamUsersList) return;
-        iamUsersList.innerHTML = '<tr><td colspan="4" class="text-center text-muted py-5"><div class="spinner-border spinner-border-sm"></div> 正在请求甲骨文 API 获取用户列表...</td></tr>';
-        
-        try {
-            const users = await apiRequest('/oci/api/identity/users');
-            iamUsersList.innerHTML = '';
-            
-            if (users.length === 0) {
-                iamUsersList.innerHTML = '<tr><td colspan="4" class="text-center text-muted py-4">未找到任何用户</td></tr>';
-                return;
-            }
-            
-            users.forEach(user => {
-                const tr = document.createElement('tr');
-                const statusColor = user.lifecycle_state === 'ACTIVE' ? 'success' : 'secondary';
-                
-                // 👇 隐藏“无”或者默认的描述，让界面更清爽
-                let descHtml = '';
-                if (user.description && user.description !== '无' && user.description !== 'Created via Web Panel') {
-                    descHtml = `<br><small class="text-muted" style="font-size: 0.75rem;">${user.description}</small>`;
-                }
-                
-                let emailHtml = user.email === '未绑定' 
-                    ? `<span class="text-muted small">未绑定</span>` 
-                    : `<code class="text-info">${user.email}</code>`;
-                
-                tr.innerHTML = `
-                    <td style="padding-left: 1rem;"><strong class="text-light">${user.name}</strong>${descHtml}</td>
-                    <td>${emailHtml}</td>
-                    <td class="text-center"><span class="badge bg-${statusColor}">${user.lifecycle_state}</span></td>
-                    <td class="text-center">
-                        <div class="btn-group btn-group-sm">
-                            <button class="btn btn-outline-warning action-reset-pwd" data-id="${user.id}" data-name="${user.name}" title="重置登录密码"><i class="bi bi-key"></i> 重置</button>
-                            <button class="btn btn-outline-danger action-clear-2fa" data-id="${user.id}" data-name="${user.name}" title="强制解除所有 2FA 绑定"><i class="bi bi-phone-vibrate"></i> 清 2FA</button>
-                            <button class="btn btn-outline-info action-edit-email" data-id="${user.id}" data-name="${user.name}" data-email="${user.email}" title="修改绑定的邮箱"><i class="bi bi-envelope"></i> 邮箱</button>
-                        </div>
-                    </td>
-                `;
-                iamUsersList.appendChild(tr);
-            });
-            
-            bindUserActionEvents();
-        } catch (error) {
-            iamUsersList.innerHTML = `<tr><td colspan="4" class="text-center text-danger py-4">加载失败: ${error.message}</td></tr>`;
+    saveVpusBtn?.addEventListener('click', async () => {
+        const vpus_per_gb = parseInt(editVpus.value, 10);
+        if (![10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120].includes(vpus_per_gb)) {
+            return addLog('引导卷性能必须是 10 到 120 之间的 10 的倍数', 'warning');
         }
-    }
-
-    // 3. 绑定操作按钮事件
-    function bindUserActionEvents() {
-        // 重置密码
-        document.querySelectorAll('.action-reset-pwd').forEach(btn => {
-            btn.onclick = async () => {
-                const name = btn.dataset.name;
-                const id = btn.dataset.id;
-                if (!confirm(`⚠️ 危险操作！\n\n确定要重置用户 [${name}] 的控制台登录密码吗？\n重置后将生成一个只能使用一次的临时密码，旧密码将立即失效！`)) return;
-                
-                btn.disabled = true;
-                btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>...';
-                try {
-                    const res = await apiRequest(`/oci/api/identity/users/${id}/reset-password`, { method: 'POST' });
-                    alert(`✅ 密码重置成功！\n\n用户: ${name}\n一次性临时密码: ${res.new_password}\n\n请立即复制保存此密码，关闭后将无法再次查看！`);
-                    addLog(`用户 ${name} 的密码已重置。`, 'success');
-                } catch (e) {
-                    alert(`❌ 重置失败: ${e.message}`);
-                } finally {
-                    btn.disabled = false;
-                    btn.innerHTML = '<i class="bi bi-key"></i> 重置密码';
-                }
-            };
-        });
-
-        // 清除 2FA
-        document.querySelectorAll('.action-clear-2fa').forEach(btn => {
-            btn.onclick = async () => {
-                const name = btn.dataset.name;
-                const id = btn.dataset.id;
-                if (!confirm(`🚨 确定要强制清除用户 [${name}] 绑定的所有 2FA (两步验证) 设备吗？\n清除后该用户登录时将不再需要输入验证码！`)) return;
-                
-                btn.disabled = true;
-                btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>...';
-                try {
-                    const res = await apiRequest(`/oci/api/identity/users/${id}/clear-2fa`, { method: 'POST' });
-                    alert(`✅ ${res.message}`);
-                    addLog(`已清除用户 ${name} 的 2FA 设备。`, 'success');
-                } catch (e) {
-                    alert(`❌ 清除失败: ${e.message}`);
-                } finally {
-                    btn.disabled = false;
-                    btn.innerHTML = '<i class="bi bi-phone-vibrate"></i> 清除 2FA';
-                }
-            };
-        });
-
-        // 改邮箱
-        document.querySelectorAll('.action-edit-email').forEach(btn => {
-            btn.onclick = async () => {
-                const name = btn.dataset.name;
-                const id = btn.dataset.id;
-                const oldEmail = btn.dataset.email;
-                const newEmail = prompt(`请输入用户 [${name}] 的新绑定邮箱：`, oldEmail !== '未绑定' ? oldEmail : '');
-                
-                if (newEmail === null || newEmail.trim() === '' || newEmail === oldEmail) return;
-                
-                btn.disabled = true;
-                btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>...';
-                try {
-                    const res = await apiRequest(`/oci/api/identity/users/${id}/update-email`, { 
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ email: newEmail.trim() })
-                    });
-                    addLog(`用户 ${name} 的邮箱已更新。`, 'success');
-                    loadIamUsers(); // 刷新列表
-                } catch (e) {
-                    alert(`❌ 更新邮箱失败: ${e.message}`);
-                } finally {
-                    btn.disabled = false;
-                    btn.innerHTML = '<i class="bi bi-envelope"></i> 改邮箱';
-                }
-            };
-        });
-    }
-
-    // 4. 监听弹窗与刷新
-    if (userManagementModalEl) {
-        userManagementModalEl.addEventListener('shown.bs.modal', loadIamUsers);
-    }
-    if (refreshUsersBtn) {
-        refreshUsersBtn.addEventListener('click', loadIamUsers);
-    }
-
-    // 5. 创建用户表单交互
-    if (showCreateUserBtn) {
-        showCreateUserBtn.addEventListener('click', () => {
-            createUserFormArea.classList.toggle('d-none');
-        });
-    }
-    
-    if (submitCreateUserBtn) {
-        submitCreateUserBtn.addEventListener('click', async () => {
-            const nameInput = document.getElementById('newUserName');
-            const emailInput = document.getElementById('newUserEmail');
-            const descInput = document.getElementById('newUserDesc');
-            
-            if (!nameInput.value.trim()) {
-                alert("用户名不能为空！");
-                return;
-            }
-            
-            submitCreateUserBtn.disabled = true;
-            submitCreateUserBtn.innerHTML = '创建中...';
-            
-            try {
-                const res = await apiRequest('/oci/api/identity/users', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        name: nameInput.value.trim(),
-                        email: emailInput.value.trim(),
-                        description: descInput.value.trim()
-                    })
-                });
-                alert(`✅ ${res.message}\n\n注意：新用户创建后初始没有密码，请在列表中点击【重置密码】为其生成初始密码！`);
-                nameInput.value = '';
-                emailInput.value = '';
-                createUserFormArea.classList.add('d-none');
-                loadIamUsers();
-            } catch (e) {
-                alert(`❌ 创建失败: ${e.message}`);
-            } finally {
-                submitCreateUserBtn.disabled = false;
-                submitCreateUserBtn.innerHTML = '确认创建';
-            }
-        });
-    }
-    // ==========================================
-
-    
-
-    async function initializeOciDashboard() {
-        try {
-            await loadProfiles();
-        } catch (error) {
-            console.warn('initializeOciDashboard loadProfiles failed:', error);
-        }
-
-        try {
-            await loadAndDisplayDefaultKey();
-        } catch (error) {
-            console.warn('initializeOciDashboard loadAndDisplayDefaultKey failed:', error);
-        }
-
-        try {
-            await checkSession(true);
-        } catch (error) {
-            console.warn('initializeOciDashboard checkSession failed:', error);
-        }
-    }
-
-    initializeOciDashboard();
+        await submitInstanceUpdate({ action: 'update_boot_volume', vpus_per_gb }, `正在更新实例 ${selectedInstance?.display_name || ''} 的引导卷性能...`);
+    });
 });
