@@ -452,7 +452,7 @@ def get_oci_clients(profile_config, validate=True):
     try:
         config_for_sdk = profile_config.copy()
         
-        # 注意：这里我们只保留日志，不再试图往 config 里塞 proxy 字段，因为塞了也没用
+        # 注意：这里我们只保留日志，不再试图往 config 里塞 proxy 字���，因为塞了也没用
         proxy_url = None
         if 'proxy' in profile_config and profile_config['proxy']:
             proxy_url = profile_config['proxy']
@@ -1304,6 +1304,8 @@ def get_instance_details(instance_id):
                 vnic_id = vnic_attachments[0].vnic_id
                 
                 private_ips = oci.pagination.list_call_get_all_results(vnet_client.list_private_ips, vnic_id=vnic_id).data
+                private_ip_ids = {pip.id for pip in private_ips}
+                displayed_public_ips = set()
                 for pip in private_ips:
                     pub_ip_val = "无"
                     if pip.is_primary:
@@ -1323,8 +1325,53 @@ def get_instance_details(instance_id):
                         'private_ip': pip.ip_address,
                         'public_ip': pub_ip_val,
                         'is_primary': pip.is_primary,
-                        'id': pip.id
+                        'id': pip.id,
+                        'is_orphan_reserved_public_ip': False
                     })
+                    if pub_ip_val and pub_ip_val != "无":
+                        displayed_public_ips.add(pub_ip_val)
+
+                try:
+                    reserved_public_ips = oci.pagination.list_call_get_all_results(
+                        vnet_client.list_public_ips,
+                        compartment_id=compartment_id,
+                        scope='REGION'
+                    ).data
+                    for pub_ip in reserved_public_ips:
+                        if getattr(pub_ip, 'lifetime', None) != 'RESERVED':
+                            continue
+                        if pub_ip.ip_address in displayed_public_ips:
+                            continue
+
+                        bound_private_ip_id = getattr(pub_ip, 'private_ip_id', None)
+                        orphan_reason = None
+
+                        if not bound_private_ip_id:
+                            orphan_reason = '未绑定私网IP'
+                        elif bound_private_ip_id in private_ip_ids:
+                            continue
+                        else:
+                            try:
+                                linked_private_ip = vnet_client.get_private_ip(bound_private_ip_id).data
+                                linked_vnic_id = getattr(linked_private_ip, 'vnic_id', None)
+                                if linked_vnic_id == vnic_id:
+                                    continue
+                                continue
+                            except ServiceError as orphan_check_err:
+                                if orphan_check_err.status == 404:
+                                    orphan_reason = '绑定私网IP已不存在'
+                                else:
+                                    raise
+
+                        ip_list.append({
+                            'private_ip': f'遗留 Reserved Public IP（{orphan_reason}）',
+                            'public_ip': pub_ip.ip_address,
+                            'is_primary': False,
+                            'id': pub_ip.id,
+                            'is_orphan_reserved_public_ip': True
+                        })
+                except Exception as orphan_err:
+                    logging.warning(f"Failed to fetch orphan reserved public IPs: {orphan_err}")
 
                 ipv6s = oci.pagination.list_call_get_all_results(vnet_client.list_ipv6s, vnic_id=vnic_id).data
                 for ip in ipv6s:
@@ -1577,21 +1624,63 @@ def add_secondary_ip():
 
         ip_addr = new_private_ip.ip_address
         
-        yaml_content = (
-            "network:\\\\n"
-            "  version: 2\\\\n"
-            "  ethernets:\\\\n"
-            "    $IFACE:\\\\n"
-            "      addresses:\\\\n"
-            f"        - {ip_addr}/24"
-        )
-        
-        cmd_hint = (
-            f"IFACE=$(ip route get 1 | awk '{{print $5;exit}}'); "
-            f"sudo printf \"{yaml_content}\" | sudo tee /etc/netplan/99-secondary-ip-{ip_addr.replace('.', '-')}.yaml > /dev/null; "
-            f"sudo netplan apply; "
-            f"echo '✅ IP {ip_addr} added successfully!'"
-        )
+        cmd_hint = f'''IFACE=$(ip route get 1 | awk '{{print $5;exit}}')
+SUDO=""
+[ "$(id -u)" -ne 0 ] && SUDO="sudo"
+
+if command -v netplan >/dev/null 2>&1 && [ -d /etc/netplan ]; then
+  $SUDO tee /etc/netplan/99-secondary-ip-{ip_addr.replace('.', '-')}.yaml >/dev/null <<EOF
+network:
+  version: 2
+  ethernets:
+    ${{IFACE}}:
+      addresses:
+        - {ip_addr}/24
+EOF
+  $SUDO netplan apply
+  echo "✅ IP {ip_addr} added successfully via netplan!"
+elif [ -f /etc/network/interfaces ]; then
+  $SUDO ip addr add {ip_addr}/24 dev "$IFACE" 2>/dev/null || true
+  $SUDO cp /etc/network/interfaces /etc/network/interfaces.bak.$(date +%F-%H%M%S)
+  $SUDO python3 - <<PY
+from pathlib import Path
+p = Path('/etc/network/interfaces')
+text = p.read_text()
+iface = "${{IFACE}}"
+line = f"    up ip addr add {ip_addr}/24 dev {{iface}} || true"
+if line not in text:
+    lines = text.splitlines()
+    new_lines = []
+    inside = False
+    matched_iface = False
+    inserted = False
+    for raw in lines:
+        stripped = raw.strip()
+        is_top_level = bool(raw) and not raw.startswith((' ', '\t')) and not raw.startswith('#')
+        if stripped.startswith('iface '):
+            parts = stripped.split()
+            if inside and not inserted:
+                new_lines.append(line)
+                inserted = True
+            inside = len(parts) >= 2 and parts[1] == iface
+            matched_iface = matched_iface or inside
+        elif inside and is_top_level:
+            if not inserted:
+                new_lines.append(line)
+                inserted = True
+            inside = False
+        new_lines.append(raw)
+    if inside and not inserted:
+        new_lines.append(line)
+        inserted = True
+    if matched_iface and inserted:
+        p.write_text("\n".join(new_lines) + "\n")
+PY
+  echo "✅ IP {ip_addr} added successfully via /etc/network/interfaces!"
+else
+  $SUDO ip addr add {ip_addr}/24 dev "$IFACE"
+  echo "⚠️ IP {ip_addr} added temporarily. No netplan or /etc/network/interfaces detected; please persist it manually if needed."
+fi'''
 
         return jsonify({
             'message': 'IP 附加成功！',
@@ -1613,11 +1702,44 @@ def delete_secondary_ip():
     try:
         data = request.json
         private_ip_id = data.get('private_ip_id')
-        
-        if not private_ip_id:
-            return jsonify({"error": "缺少 private_ip_id 参数"}), 400
+        public_ip_id = data.get('public_ip_id')
+
+        if not private_ip_id and not public_ip_id:
+            return jsonify({"error": "缺少 private_ip_id 或 public_ip_id 参数"}), 400
+
+        def _build_cleanup_cmd(ip_addr):
+            return f'''IFACE=$(ip route get 1 | awk '{{print $5;exit}}')
+SUDO=""
+[ "$(id -u)" -ne 0 ] && SUDO="sudo"
+
+if command -v netplan >/dev/null 2>&1 && [ -d /etc/netplan ]; then
+  $SUDO rm -f /etc/netplan/99-secondary-ip-{ip_addr.replace('.', '-')}.yaml
+  $SUDO netplan apply
+  $SUDO ip addr del {ip_addr}/24 dev "$IFACE" 2>/dev/null || true
+  echo "✅ IP {ip_addr} cleanup completed via netplan!"
+elif [ -f /etc/network/interfaces ]; then
+  $SUDO ip addr del {ip_addr}/24 dev "$IFACE" 2>/dev/null || true
+  $SUDO cp /etc/network/interfaces /etc/network/interfaces.bak.$(date +%F-%H%M%S)
+  $SUDO python3 - <<PY
+from pathlib import Path
+p = Path('/etc/network/interfaces')
+text = p.read_text()
+iface = "${{IFACE}}"
+line = f"    up ip addr add {ip_addr}/24 dev {{iface}} || true"
+text = text.replace(line + "\n", "")
+p.write_text(text)
+PY
+  echo "✅ IP {ip_addr} cleanup completed via /etc/network/interfaces!"
+else
+  $SUDO ip addr del {ip_addr}/24 dev "$IFACE" 2>/dev/null || true
+  echo "⚠️ IP {ip_addr} has been removed temporarily. No netplan or /etc/network/interfaces detected, so please verify persistence manually."
+fi'''
 
         vnet_client = g.oci_clients['vnet']
+
+        if public_ip_id and not private_ip_id:
+            vnet_client.delete_public_ip(public_ip_id)
+            return jsonify({"success": True, "message": "遗留 Reserved Public IP 删除请求已提交（立即生效）。"})
 
         try:
             private_ip_obj = vnet_client.get_private_ip(private_ip_id).data
@@ -1628,8 +1750,24 @@ def delete_secondary_ip():
                 return jsonify({"error": "IP 地址不存在或已被删除。"}), 404
             raise
 
+        deleted_public_ip = False
+        try:
+            pub_ip_obj = vnet_client.get_public_ip_by_private_ip_id(
+                GetPublicIpByPrivateIpIdDetails(private_ip_id=private_ip_id)
+            ).data
+            vnet_client.delete_public_ip(pub_ip_obj.id)
+            deleted_public_ip = True
+            time.sleep(2)
+        except ServiceError as se:
+            if se.status != 404:
+                raise
+
         vnet_client.delete_private_ip(private_ip_id)
-        return jsonify({"success": True, "message": "IP 删除请求已提交（立即生效）。"})
+        message = "IP 删除请求已提交（立即生效）。"
+        if deleted_public_ip:
+            message = "辅助私有 IP 及其关联的 Reserved Public IP 删除请求已提交（立即生效）。"
+        cleanup_cmd = _build_cleanup_cmd(private_ip_obj.ip_address)
+        return jsonify({"success": True, "message": message, "cleanup_cmd": cleanup_cmd, "cleanup_ip": private_ip_obj.ip_address})
 
     except ServiceError as e:
         return jsonify({'error': f"OCI API 错误: {e.message}"}), 500
@@ -2290,11 +2428,9 @@ def _snatch_instance_task(task_id, profile_config, alias, details, run_id, auto_
             else:
                 instance_password = generate_oci_password()
 
-        # 读取 Cloudflare 配置获取主域名
         cf_config = load_cloudflare_config()
         cf_domain = cf_config.get('domain', '')
         
-        # 读取 X-UI 对接配置
         xui_conf = load_xui_config()
         raw_url = xui_conf.get('manager_url', '').strip().rstrip('/')
         manager_secret = xui_conf.get('manager_secret', '')
@@ -2326,14 +2462,14 @@ export AUTO_REG_SECRET="{manager_secret}"
         ]
         
         agent_config_details = oci.core.models.LaunchInstanceAgentConfigDetails(
-            is_monitoring_disabled=True,  
-            is_management_disabled=False, 
-            plugins_config=plugins_config_list 
+            is_monitoring_disabled=True,
+            is_management_disabled=False,
+            plugins_config=plugins_config_list
         )
         
         base_launch_details = {
             "compartment_id": tenancy_ocid,
-            "shape": shape, 
+            "shape": shape,
             "display_name": details.get('display_name_prefix', 'snatch-instance'),
             "create_vnic_details": CreateVnicDetails(subnet_id=subnet_id, assign_public_ip=True),
             "metadata": {"ssh_authorized_keys": ssh_key, "user_data": user_data_encoded},
@@ -2358,7 +2494,7 @@ export AUTO_REG_SECRET="{manager_secret}"
         if current_task_data['status'] != 'running':
             logging.info(f"Task {task_id} status is '{current_task_data['status']}', not 'running'. Worker will exit.")
             return
-            
+
         try:
             current_result_json = json.loads(current_task_data['result'])
             db_run_id = current_result_json.get('run_id')
@@ -2373,51 +2509,47 @@ export AUTO_REG_SECRET="{manager_secret}"
         attempt_count += 1
         status_data['attempt_count'] = attempt_count
         force_update = False
-        
+
         current_ad_index = (attempt_count - 1) % len(availability_domains)
         current_ad_name = availability_domains[current_ad_index]
-        
-        if 'details' not in status_data: status_data['details'] = {}
+
+        if 'details' not in status_data:
+            status_data['details'] = {}
         status_data['details']['ad'] = current_ad_name
-        
+
         try:
             launch_details_dict = base_launch_details.copy()
             launch_details_dict['availability_domain'] = current_ad_name
             launch_details = LaunchInstanceDetails(**launch_details_dict)
-            
+
             status_data['last_message'] = f"正在 {current_ad_name} 中尝试..."
             _db_execute_celery('UPDATE tasks SET result = ? WHERE id = ?', (json.dumps(status_data), task_id))
-            force_update = True 
-            
+            force_update = True
+
             instance = compute_client.launch_instance(launch_details).data
-            
+
             status_data['last_message'] = f"第 {status_data['attempt_count']} 次尝试成功！实例 {instance.display_name} 正在置备..."
             _db_execute_celery('UPDATE tasks SET result = ? WHERE id = ?', (json.dumps(status_data), task_id))
             oci.wait_until(compute_client, compute_client.get_instance(instance.id), 'lifecycle_state', 'RUNNING', max_wait_seconds=600)
-            
+
             public_ip = "获取中..."
             try:
                 vnic_attachments = oci.pagination.list_call_get_all_results(compute_client.list_vnic_attachments, compartment_id=tenancy_ocid, instance_id=instance.id).data
                 if vnic_attachments:
                     vnic = vnet_client.get_vnic(vnic_attachments[0].vnic_id).data
                     public_ip = vnic.public_ip or "无"
-            except Exception as ip_e:
+            except Exception:
                 public_ip = "获取失败"
 
-            # ------------------------------------------------------------------
-            # 新增：自动开放防火墙逻辑
-            # ------------------------------------------------------------------
             firewall_msg = ""
             try:
-                # subnet_id 在任务开始时已获取
                 firewall_msg = _auto_open_firewall(vnet_client, subnet_id, task_id)
             except Exception as fw_e:
                 logging.error(f"Task {task_id} firewall auto-open error: {fw_e}")
                 firewall_msg = f"⚠️ 防火墙自动开放异常: {str(fw_e)[:30]}"
-            # ------------------------------------------------------------------
-            
+
             db_msg = f"🎉 抢占成功 (第 {status_data['attempt_count']} 次尝试)!\n- 实例名: {instance.display_name}\n- 可用区: {current_ad_name}\n- 公网IP: {public_ip}\n- 登陆用户名：root"
-            
+
             if firewall_msg:
                 db_msg += f"\n- {firewall_msg}"
 
@@ -2432,7 +2564,7 @@ export AUTO_REG_SECRET="{manager_secret}"
                 db_msg += f"\n{dns_update_msg}"
 
             _db_execute_celery('UPDATE tasks SET status = ?, result = ?, completed_at = ? WHERE id = ?', ('success', db_msg, datetime.datetime.now(timezone.utc).isoformat(), task_id))
-            
+
             duration_str = "未知"
             try:
                 start_time = datetime.datetime.fromisoformat(status_data['start_time'])
@@ -2448,14 +2580,14 @@ export AUTO_REG_SECRET="{manager_secret}"
                              f"- 可用区: {current_ad_name}\n"
                              f"- 公网IP: {public_ip}\n"
                              f"- 登陆用户名: root")
-            
+
             if enable_password_auth and instance_password:
                 result_for_tg += f"\n- 密码: {instance_password}"
             else:
                 result_for_tg += "\n- 登录方式: 仅 SSH 密钥"
 
             if firewall_msg:
-                 result_for_tg += f"\n- {firewall_msg}"
+                result_for_tg += f"\n- {firewall_msg}"
 
             if dns_update_msg:
                 result_for_tg += f"\n{dns_update_msg}"
@@ -2464,9 +2596,8 @@ export AUTO_REG_SECRET="{manager_secret}"
                       f"*账户*: `{alias}`\n"
                       f"*任务名称*: `{details.get('display_name_prefix', 'snatch-instance')}`\n\n"
                       f"*结果*:\n{result_for_tg}")
-            
+
             send_tg_notification(tg_msg)
-            
             return
         except ServiceError as e:
             force_update = True
@@ -2477,7 +2608,7 @@ export AUTO_REG_SECRET="{manager_secret}"
         except Exception as e:
             force_update = True
             status_data['last_message'] = f"在 {current_ad_name} 中遇到未知错误 ({str(e)[:50]}...)"
-        
+
         task_record_check = query_db('SELECT status FROM tasks WHERE id = ?', [task_id], one=True)
         if not task_record_check or task_record_check['status'] not in ['running', 'pending']:
             logging.info(f"Snatching task {task_id} has been stopped or paused. Exiting loop.")
