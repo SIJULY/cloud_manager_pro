@@ -1640,42 +1640,19 @@ EOF
   $SUDO netplan apply
   echo "✅ IP {ip_addr} added successfully via netplan!"
 elif [ -f /etc/network/interfaces ]; then
+  LINE="    up ip addr add {ip_addr}/24 dev $IFACE || true"
   $SUDO ip addr add {ip_addr}/24 dev "$IFACE" 2>/dev/null || true
   $SUDO cp /etc/network/interfaces /etc/network/interfaces.bak.$(date +%F-%H%M%S)
-  $SUDO python3 - <<PY
-from pathlib import Path
-p = Path('/etc/network/interfaces')
-text = p.read_text()
-iface = "${{IFACE}}"
-line = f"    up ip addr add {ip_addr}/24 dev {{iface}} || true"
-if line not in text:
-    lines = text.splitlines()
-    new_lines = []
-    inside = False
-    matched_iface = False
-    inserted = False
-    for raw in lines:
-        stripped = raw.strip()
-        is_top_level = bool(raw) and not raw.startswith((' ', '\t')) and not raw.startswith('#')
-        if stripped.startswith('iface '):
-            parts = stripped.split()
-            if inside and not inserted:
-                new_lines.append(line)
-                inserted = True
-            inside = len(parts) >= 2 and parts[1] == iface
-            matched_iface = matched_iface or inside
-        elif inside and is_top_level:
-            if not inserted:
-                new_lines.append(line)
-                inserted = True
-            inside = False
-        new_lines.append(raw)
-    if inside and not inserted:
-        new_lines.append(line)
-        inserted = True
-    if matched_iface and inserted:
-        p.write_text("\n".join(new_lines) + "\n")
-PY
+  if ! $SUDO grep -qF "$LINE" /etc/network/interfaces; then
+    if $SUDO grep -qE '^[[:space:]]*gateway[[:space:]]+' /etc/network/interfaces; then
+      $SUDO sed -i "/^[[:space:]]*gateway[[:space:]]\\+/a\\$LINE" /etc/network/interfaces
+    elif $SUDO grep -qE "^iface[[:space:]]+$IFACE[[:space:]]+inet" /etc/network/interfaces; then
+      $SUDO sed -i "/^iface[[:space:]]\\+$IFACE[[:space:]]\\+inet/a\\$LINE" /etc/network/interfaces
+    else
+      echo "⚠️ 已临时添加 IP {ip_addr}，但未找到 $IFACE 对应的 interfaces 配置块，请手动持久化。"
+      exit 0
+    fi
+  fi
   echo "✅ IP {ip_addr} added successfully via /etc/network/interfaces!"
 else
   $SUDO ip addr add {ip_addr}/24 dev "$IFACE"
@@ -1708,27 +1685,21 @@ def delete_secondary_ip():
             return jsonify({"error": "缺少 private_ip_id 或 public_ip_id 参数"}), 400
 
         def _build_cleanup_cmd(ip_addr):
+            yaml_suffix = ip_addr.replace('.', '-')
+            escaped_ip = ip_addr.replace('.', '\\.')
             return f'''IFACE=$(ip route get 1 | awk '{{print $5;exit}}')
 SUDO=""
 [ "$(id -u)" -ne 0 ] && SUDO="sudo"
 
 if command -v netplan >/dev/null 2>&1 && [ -d /etc/netplan ]; then
-  $SUDO rm -f /etc/netplan/99-secondary-ip-{ip_addr.replace('.', '-')}.yaml
+  $SUDO rm -f /etc/netplan/99-secondary-ip-{yaml_suffix}.yaml
   $SUDO netplan apply
   $SUDO ip addr del {ip_addr}/24 dev "$IFACE" 2>/dev/null || true
   echo "✅ IP {ip_addr} cleanup completed via netplan!"
 elif [ -f /etc/network/interfaces ]; then
   $SUDO ip addr del {ip_addr}/24 dev "$IFACE" 2>/dev/null || true
   $SUDO cp /etc/network/interfaces /etc/network/interfaces.bak.$(date +%F-%H%M%S)
-  $SUDO python3 - <<PY
-from pathlib import Path
-p = Path('/etc/network/interfaces')
-text = p.read_text()
-iface = "${{IFACE}}"
-line = f"    up ip addr add {ip_addr}/24 dev {{iface}} || true"
-text = text.replace(line + "\n", "")
-p.write_text(text)
-PY
+  $SUDO sed -i "\\|^[[:space:]]*up ip addr add {escaped_ip}\\/24 dev $IFACE || true$|d" /etc/network/interfaces
   echo "✅ IP {ip_addr} cleanup completed via /etc/network/interfaces!"
 else
   $SUDO ip addr del {ip_addr}/24 dev "$IFACE" 2>/dev/null || true
