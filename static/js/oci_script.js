@@ -322,6 +322,15 @@ document.addEventListener('DOMContentLoaded', function() {
     let globalCfStatus = null;
     let globalTgStatus = null;
     let globalSshStatus = null;
+    let profileSummaryIntervalId = null;
+    let configSummaryIntervalId = null;
+    let snatchSummaryIntervalId = null;
+    let isRefreshingProfileSummary = false;
+    let isRefreshingConfigSummary = false;
+    let isRefreshingSnatchSummary = false;
+    const PROFILE_SUMMARY_REFRESH_MS = 30000;
+    const CONFIG_SUMMARY_REFRESH_MS = 45000;
+    const SNATCH_SUMMARY_REFRESH_MS = 5000;
 
     const accountColors = {};
     const colorPalette = ['#007bff', '#28a745', '#dc3545', '#ffc107', '#17a2b8', '#6610f2', '#e83e8c'];
@@ -875,29 +884,114 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-    async function refreshDashboardSummaries(currentAlias = null) {
+    async function refreshProfileSummary(currentAlias = null) {
+        if (isRefreshingProfileSummary) return;
+        isRefreshingProfileSummary = true;
         try {
-            const [profiles, running, completed, cloudflareConfig, tgConfig, defaultKeyResponse] = await Promise.all([
-                apiRequest('/oci/api/profiles'),
+            const alias = currentAlias !== null ? currentAlias : await getCurrentSessionAlias();
+            const profiles = await apiRequest('/oci/api/profiles');
+
+            updateStatCards({
+                profileCount: Array.isArray(profiles) ? profiles.length : 0,
+                currentAlias: alias
+            });
+        } catch (error) {
+            console.warn('refreshProfileSummary failed:', error);
+        } finally {
+            isRefreshingProfileSummary = false;
+        }
+    }
+
+    async function refreshSnatchTaskSummary() {
+        if (isRefreshingSnatchSummary) return;
+        isRefreshingSnatchSummary = true;
+        try {
+            const [running, completed] = await Promise.all([
                 apiRequest('/oci/api/tasks/snatching/running'),
-                apiRequest('/oci/api/tasks/snatching/completed'),
+                apiRequest('/oci/api/tasks/snatching/completed')
+            ]);
+
+            updateStatCards({
+                runningCount: Array.isArray(running) ? running.length : 0,
+                completedCount: Array.isArray(completed) ? completed.length : 0
+            });
+        } catch (error) {
+            console.warn('refreshSnatchTaskSummary failed:', error);
+        } finally {
+            isRefreshingSnatchSummary = false;
+        }
+    }
+
+    async function refreshConfigSummary() {
+        if (isRefreshingConfigSummary) return;
+        isRefreshingConfigSummary = true;
+        try {
+            const [cloudflareConfig, tgConfig, defaultKeyResponse] = await Promise.all([
                 apiRequest('/oci/api/cloudflare-config'),
                 apiRequest('/oci/api/tg-config'),
                 apiRequest('/oci/api/default-ssh-key')
             ]);
 
             updateStatCards({
-                profileCount: Array.isArray(profiles) ? profiles.length : 0,
-                currentAlias,
-                runningCount: Array.isArray(running) ? running.length : 0,
-                completedCount: Array.isArray(completed) ? completed.length : 0,
                 cloudflareConfigured: !!(cloudflareConfig && (cloudflareConfig.api_token || cloudflareConfig.zone_id || cloudflareConfig.domain)),
                 tgConfigured: !!(tgConfig && (tgConfig.bot_token || tgConfig.chat_id)),
                 defaultKeyConfigured: !!(defaultKeyResponse && defaultKeyResponse.key)
             });
         } catch (error) {
-            console.warn('refreshDashboardSummaries failed:', error);
+            console.warn('refreshConfigSummary failed:', error);
+        } finally {
+            isRefreshingConfigSummary = false;
         }
+    }
+
+    async function refreshDashboardSummaries(currentAlias = null) {
+        await Promise.all([
+            refreshProfileSummary(currentAlias),
+            refreshSnatchTaskSummary(),
+            refreshConfigSummary()
+        ]);
+    }
+
+    async function getCurrentSessionAlias() {
+        try {
+            const session = await apiRequest('/oci/api/session');
+            return session.logged_in && session.alias ? session.alias : null;
+        } catch (error) {
+            return null;
+        }
+    }
+
+    function stopDashboardSummaryPolling() {
+        if (profileSummaryIntervalId) {
+            clearInterval(profileSummaryIntervalId);
+            profileSummaryIntervalId = null;
+        }
+        if (configSummaryIntervalId) {
+            clearInterval(configSummaryIntervalId);
+            configSummaryIntervalId = null;
+        }
+        if (snatchSummaryIntervalId) {
+            clearInterval(snatchSummaryIntervalId);
+            snatchSummaryIntervalId = null;
+        }
+    }
+
+    function startDashboardSummaryPolling() {
+        stopDashboardSummaryPolling();
+
+        refreshDashboardSummaries();
+        profileSummaryIntervalId = setInterval(() => {
+            if (document.hidden) return;
+            refreshProfileSummary();
+        }, PROFILE_SUMMARY_REFRESH_MS);
+        configSummaryIntervalId = setInterval(() => {
+            if (document.hidden) return;
+            refreshConfigSummary();
+        }, CONFIG_SUMMARY_REFRESH_MS);
+        snatchSummaryIntervalId = setInterval(() => {
+            if (document.hidden) return;
+            refreshSnatchTaskSummary();
+        }, SNATCH_SUMMARY_REFRESH_MS);
     }
 
     async function renderConnectedProfileDetails(alias) {
@@ -2263,4 +2357,14 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         await submitInstanceUpdate({ action: 'update_boot_volume', vpus_per_gb }, `正在更新实例 ${selectedInstance?.display_name || ''} 的引导卷性能...`);
     });
+
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) {
+            stopDashboardSummaryPolling();
+        } else {
+            startDashboardSummaryPolling();
+        }
+    });
+
+    startDashboardSummaryPolling();
 });
